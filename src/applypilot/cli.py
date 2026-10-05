@@ -197,9 +197,28 @@ def apply(
         )
         raise typer.Exit(code=1)
 
-    # Check 3: Tailored resumes exist (skip for --gen with --url)
-    if not (gen and url):
-        conn = get_connection()
+    # Check 3: Resumes readiness (targeted job for --url, or global queue)
+    conn = get_connection()
+    if url:
+        like = f"%{url.split('?')[0].rstrip('/')}%"
+        job_row = conn.execute("""
+            SELECT tailored_resume_path, apply_status, applied_at
+            FROM jobs
+            WHERE url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?
+            LIMIT 1
+        """, (url, url, like, like)).fetchone()
+        if not job_row:
+            console.print(f"[red]Job not found for URL:[/red] {url}")
+            raise typer.Exit(code=1)
+        # If job was previously applied or failed (re-apply scenario), reset status so worker acquires it
+        if job_row[1] == "applied" or job_row[2] is not None:
+            conn.execute("""
+                UPDATE jobs
+                SET apply_status = 'pending', applied_at = NULL, apply_error = NULL
+                WHERE url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?
+            """, (url, url, like, like))
+            conn.commit()
+    else:
         ready = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
         ).fetchone()[0]

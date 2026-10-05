@@ -218,19 +218,43 @@ APPLY_MILESTONES = [
 ]
 
 
-def _run_auto_apply_job(profile_name: str, url: str):
+def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
     profile_dir = get_profile_dir(profile_name)
-    conn = get_db_connection(profile_dir)
-    job_info = {"title": "Job Application", "site": "Portal"}
+    conn = get_writable_db_connection(profile_dir)
+    job_info = {"title": "Job Application", "site": "Portal", "tailored_resume_path": None}
     if conn:
         try:
-            r = conn.execute("SELECT title, site FROM jobs WHERE url = ? OR application_url = ?", (url, url)).fetchone()
+            r = conn.execute(
+                "SELECT title, site, tailored_resume_path, apply_status, applied_at FROM jobs WHERE url = ? OR application_url = ?",
+                (url, url)
+            ).fetchone()
             if r:
                 job_info["title"] = r["title"] or "Job Application"
                 job_info["site"] = r["site"] or "Portal"
+                job_info["tailored_resume_path"] = r["tailored_resume_path"]
+            # For Re-apply or retry: reset status to pending so acquire_job will pick it up
+            conn.execute(
+                "UPDATE jobs SET apply_status = 'pending', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
+                (url, url)
+            )
+            conn.commit()
             conn.close()
         except Exception:
-            pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    # Ensure profile directory has a valid master resume PDF
+    try:
+        master_txt = profile_dir / "resume.txt"
+        master_pdf = profile_dir / "resume.pdf"
+        if master_txt.exists() and not master_pdf.exists():
+            from applypilot.scoring.pdf import convert_to_pdf
+            convert_to_pdf(master_txt, master_pdf)
+    except Exception:
+        pass
 
     with AUTO_APPLY_LOCK:
         AUTO_APPLY_TASKS[url] = {
@@ -238,59 +262,165 @@ def _run_auto_apply_job(profile_name: str, url: str):
             "title": job_info["title"],
             "site": job_info["site"],
             "status": "in_progress",
-            "percent": 5,
+            "percent": 15,
             "step_index": 1,
             "total_steps": 5,
-            "current_step": "Initializing application session...",
+            "current_step": "Launching autonomous browser & Claude Code...",
             "completed_steps": [],
-            "remaining_steps": [m["name"] for m in APPLY_MILESTONES],
+            "remaining_steps": ["Playwright MCP Connection", "Form Detection & Autofill", "Resume Attachment", "Submission"],
             "log": [f"[{datetime.now().strftime('%H:%M:%S')}] Started Auto-Apply for {job_info['title']}"],
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
         }
 
-    # Step through 5 milestones
-    for i, m in enumerate(APPLY_MILESTONES):
-        time.sleep(1.2)
-        now_ts = datetime.now().strftime('%H:%M:%S')
-        with AUTO_APPLY_LOCK:
-            task = AUTO_APPLY_TASKS.get(url)
-            if not task or task.get("status") == "cancelled":
-                return
-            task["step_index"] = m["index"]
-            task["percent"] = m["pct"]
-            task["current_step"] = m["name"]
-            task["completed_steps"] = [x["name"] for x in APPLY_MILESTONES[:i]]
-            task["remaining_steps"] = [x["name"] for x in APPLY_MILESTONES[i+1:]]
-            task["log"].append(f"[{now_ts}] {m['desc']}")
-            task["updated_at"] = datetime.now(timezone.utc).isoformat()
+    log_dir = profile_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^\w\s-]", "", job_info["title"])[:25].strip().replace(" ", "_")
+    log_file = log_dir / f"apply_{int(time.time())}_{slug}.log"
+    pipe_log = log_dir / "pipeline_run.log"
 
-    # Step 5 completed: commit to SQLite!
-    wconn = get_writable_db_connection(profile_dir)
-    if wconn:
-        try:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            wconn.execute(
-                "UPDATE jobs SET apply_status = 'applied', applied_at = ?, apply_error = NULL WHERE url = ? OR application_url = ?",
-                (now_iso, url, url),
-            )
-            wconn.commit()
-            wconn.close()
-        except Exception:
+    cmd_base = get_applypilot_bin()
+    cmd = [*cmd_base, "apply", "--url", url, "-w", "1", "--min-score", "0"]
+    if dry_run:
+        cmd.append("--dry-run")
+
+    env = os.environ.copy()
+    env["APPLYPILOT_DIR"] = str(profile_dir)
+    env["PYTHONUNBUFFERED"] = "1"
+    extra_paths = ["/Users/sangam/.nvm/versions/node/v22.15.1/bin", "/opt/homebrew/bin", "/usr/local/bin"]
+    curr_path = env.get("PATH", "")
+    for p in extra_paths:
+        if p not in curr_path:
+            curr_path = f"{p}:{curr_path}"
+    env["PATH"] = curr_path
+
+    start_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    with open(pipe_log, "a", encoding="utf-8") as plf:
+        plf.write(f"\n[AUTO-APPLY] [{start_ts}] Executing: {' '.join(cmd)}\n")
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=str(REPO_DIR),
+            env=env,
+        )
+
+        with open(log_file, "w", encoding="utf-8") as lf, open(pipe_log, "a", encoding="utf-8") as plf:
+            for line in proc.stdout:
+                lf.write(line)
+                lf.flush()
+                plf.write(line)
+                plf.flush()
+                clean_line = line.strip()
+                if not clean_line:
+                    continue
+
+                lower_line = clean_line.lower()
+                now_str = datetime.now().strftime('%H:%M:%S')
+
+                with AUTO_APPLY_LOCK:
+                    task = AUTO_APPLY_TASKS.get(url)
+                    if not task:
+                        continue
+
+                    # Dynamic milestone detection based on real ApplyPilot + Claude output
+                    if "launching chrome" in lower_line or "launching apply pipeline" in lower_line:
+                        task["step_index"] = 1
+                        task["percent"] = 25
+                        task["current_step"] = "Chrome & Playwright MCP Initializing"
+                        task["completed_steps"] = []
+                        task["remaining_steps"] = ["Portal Navigation", "Form Autofill", "Resume Attachment", "Submission"]
+                        task["log"].append(f"[{now_str}] Browser session active (CDP port initialized)")
+
+                    elif "starting:" in lower_line or "claude" in lower_line or "running" in lower_line:
+                        task["step_index"] = 2
+                        task["percent"] = 45
+                        task["current_step"] = "Claude Code Agent Navigating Portal"
+                        task["completed_steps"] = ["Browser Initialized"]
+                        task["remaining_steps"] = ["Form Detection & Autofill", "Resume Attachment", "Submission"]
+                        task["log"].append(f"[{now_str}] Claude Code session inspecting job application portal")
+
+                    elif "tool" in lower_line or "fill" in lower_line or "input" in lower_line or "form" in lower_line:
+                        task["step_index"] = 3
+                        task["percent"] = 70
+                        task["current_step"] = "Filling Fields & Attaching ATS Resume"
+                        task["completed_steps"] = ["Browser Initialized", "Portal Navigated"]
+                        task["remaining_steps"] = ["AI Screening Questions", "Submission"]
+                        task["log"].append(f"[{now_str}] Form autofill & document attachment in progress")
+
+                    elif "applied" in lower_line or "submitted" in lower_line:
+                        task["step_index"] = 5
+                        task["percent"] = 95
+                        task["current_step"] = "Submitting Application & Verifying"
+
+                    task["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        proc.wait()
+
+        # Check DB state for real outcome
+        final_conn = get_db_connection(profile_dir)
+        db_job = None
+        if final_conn:
             try:
-                wconn.close()
+                db_job = final_conn.execute(
+                    "SELECT apply_status, applied_at, apply_error FROM jobs WHERE url = ? OR application_url = ?",
+                    (url, url)
+                ).fetchone()
+                final_conn.close()
             except Exception:
                 pass
 
-    with AUTO_APPLY_LOCK:
-        if url in AUTO_APPLY_TASKS:
-            AUTO_APPLY_TASKS[url]["status"] = "completed"
-            AUTO_APPLY_TASKS[url]["percent"] = 100
-            AUTO_APPLY_TASKS[url]["current_step"] = "Application Submitted & Verified"
-            AUTO_APPLY_TASKS[url]["completed_steps"] = [m["name"] for m in APPLY_MILESTONES]
-            AUTO_APPLY_TASKS[url]["remaining_steps"] = []
-            AUTO_APPLY_TASKS[url]["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Application marked as Applied in database.")
-            AUTO_APPLY_TASKS[url]["updated_at"] = datetime.now(timezone.utc).isoformat()
+        now_str = datetime.now().strftime('%H:%M:%S')
+        with AUTO_APPLY_LOCK:
+            task = AUTO_APPLY_TASKS.get(url)
+            if task:
+                apply_status = db_job["apply_status"] if db_job else None
+                apply_error = db_job["apply_error"] if db_job else None
+
+                if apply_status == "applied":
+                    task["status"] = "completed"
+                    task["percent"] = 100
+                    task["step_index"] = 5
+                    task["current_step"] = "Application Submitted & Verified"
+                    task["completed_steps"] = ["Browser Initialized", "Portal Navigated", "Form Autofill", "Resume Attached", "Submitted"]
+                    task["remaining_steps"] = []
+                    task["log"].append(f"[{now_str}] ✅ Successfully submitted and recorded in database.")
+                elif apply_status == "failed" or apply_error:
+                    err_msg = apply_error or "Application was marked as failed"
+                    task["status"] = "failed"
+                    task["error"] = err_msg
+                    task["percent"] = 100
+                    task["current_step"] = f"Failed: {err_msg[:40]}"
+                    task["log"].append(f"[{now_str}] ❌ Application obstacle/error: {err_msg}")
+                elif proc.returncode != 0:
+                    task["status"] = "failed"
+                    task["error"] = f"ApplyPilot exited with code {proc.returncode}"
+                    task["percent"] = 100
+                    task["current_step"] = f"Process error (code {proc.returncode})"
+                    task["log"].append(f"[{now_str}] ❌ Process exited with error code {proc.returncode}")
+                else:
+                    # Clean completion
+                    task["status"] = "completed"
+                    task["percent"] = 100
+                    task["current_step"] = "Apply Workflow Completed"
+                    task["log"].append(f"[{now_str}] Apply workflow finished.")
+
+                task["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    except Exception as e:
+        now_str = datetime.now().strftime('%H:%M:%S')
+        with AUTO_APPLY_LOCK:
+            task = AUTO_APPLY_TASKS.get(url)
+            if task:
+                task["status"] = "failed"
+                task["error"] = str(e)
+                task["current_step"] = f"Error: {str(e)[:40]}"
+                task["log"].append(f"[{now_str}] Exception: {str(e)}")
+                task["updated_at"] = datetime.now(timezone.utc).isoformat()
 
 
 def discover_all_profiles() -> list[dict]:
@@ -1691,9 +1821,10 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                     self.send_json({"error": str(e)}, status=500)
                 return
 
-            # Autonomous Apply mode with live milestones
+            # Autonomous Apply mode with real ApplyPilot CLI workflow
+            dry_run = bool(data.get("dry_run", False))
             for u in urls:
-                t = threading.Thread(target=_run_auto_apply_job, args=(profile_name, u), daemon=True)
+                t = threading.Thread(target=_run_auto_apply_job, args=(profile_name, u, dry_run), daemon=True)
                 t.start()
 
             self.send_json({
@@ -1701,6 +1832,7 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                 "mode": "auto",
                 "queued": len(urls),
                 "urls": urls,
+                "dry_run": dry_run,
                 "message": f"Autonomous application initiated for {len(urls)} job(s).",
             })
             return

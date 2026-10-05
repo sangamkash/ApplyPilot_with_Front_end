@@ -442,9 +442,37 @@ def build_prompt(job: dict, tailored_resume: str,
     # --- Resolve resume PDF path ---
     resume_path = job.get("tailored_resume_path")
     if not resume_path:
-        raise ValueError(f"No tailored resume for job: {job.get('title', 'unknown')}")
+        master_pdf = config.APP_DIR / "resume.pdf"
+        master_txt = config.APP_DIR / "resume.txt"
+        if master_pdf.exists():
+            resume_path = str(master_pdf)
+        elif master_txt.exists():
+            resume_path = str(master_txt)
+        else:
+            raise ValueError(f"No resume found for job: {job.get('title', 'unknown')}")
 
     src_pdf = Path(resume_path).with_suffix(".pdf").resolve()
+    if not src_pdf.exists():
+        txt_path = Path(resume_path).with_suffix(".txt")
+        if txt_path.exists() and txt_path.stat().st_size > 0:
+            try:
+                from applypilot.scoring.pdf import convert_to_pdf
+                convert_to_pdf(txt_path, src_pdf)
+            except Exception as e:
+                logger.warning("Failed to convert tailored resume to PDF: %s", e)
+        if not src_pdf.exists():
+            master_pdf = config.APP_DIR / "resume.pdf"
+            master_txt = config.APP_DIR / "resume.txt"
+            if master_pdf.exists():
+                src_pdf = master_pdf
+            elif master_txt.exists():
+                try:
+                    from applypilot.scoring.pdf import convert_to_pdf
+                    convert_to_pdf(master_txt, master_pdf)
+                    src_pdf = master_pdf
+                except Exception as e:
+                    logger.warning("Failed to convert master resume to PDF: %s", e)
+
     if not src_pdf.exists():
         raise ValueError(f"Resume PDF not found: {src_pdf}")
 

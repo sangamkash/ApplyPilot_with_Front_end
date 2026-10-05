@@ -1746,6 +1746,22 @@ Bachelor of Science in Computer Science`;
           `;
           startApplyCell.querySelector('.btn-row-reapply')?.addEventListener('click', () => triggerAutoApplyJobs([url]));
         }
+      } else if (task.status === 'failed') {
+        if (statusCell) {
+          statusCell.innerHTML = `
+            <div class="status-cell-failed" title="${escapeHTML(task.error || 'Application failed')}">
+              <span class="badge badge-error">✕ ${escapeHTML(task.error ? (task.error.length > 25 ? task.error.substring(0, 25) + '...' : task.error) : 'Failed')}</span>
+            </div>
+          `;
+        }
+        if (startApplyCell) {
+          startApplyCell.innerHTML = `
+            <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(url)}" title="Retry Auto Apply">
+              ⚡ Retry
+            </button>
+          `;
+          startApplyCell.querySelector('.btn-row-start-apply')?.addEventListener('click', () => triggerAutoApplyJobs([url]));
+        }
       }
     });
   }

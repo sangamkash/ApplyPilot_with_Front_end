@@ -110,7 +110,6 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                        fit_score, location, full_description, cover_letter_path
                 FROM jobs
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
-                  AND tailored_resume_path IS NOT NULL
                   AND apply_status != 'in_progress'
                 LIMIT 1
             """, (target_url, target_url, like, like)).fetchone()
@@ -223,10 +222,17 @@ def gen_prompt(target_url: str, min_score: int = 7,
 
     # Read resume text
     resume_path = job.get("tailored_resume_path")
+    if not resume_path or not Path(resume_path).exists():
+        if config.RESUME_PATH.exists():
+            resume_path = str(config.RESUME_PATH)
+            job["tailored_resume_path"] = resume_path
+
     txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
     resume_text = ""
-    if txt_path and txt_path.exists():
+    if txt_path and txt_path.exists() and txt_path.stat().st_size > 0:
         resume_text = txt_path.read_text(encoding="utf-8")
+    elif config.RESUME_PATH.exists():
+        resume_text = config.RESUME_PATH.read_text(encoding="utf-8")
 
     prompt = prompt_mod.build_prompt(job=job, tailored_resume=resume_text)
 
@@ -235,8 +241,9 @@ def gen_prompt(target_url: str, min_score: int = 7,
 
     # Write prompt file
     config.ensure_dirs()
-    site_slug = (job.get("site") or "unknown")[:20].replace(" ", "_")
-    prompt_file = config.LOG_DIR / f"prompt_{site_slug}_{job['title'][:30].replace(' ', '_')}.txt"
+    site_slug = re.sub(r"[^\w\s-]", "", job.get("site") or "unknown")[:20].strip().replace(" ", "_")
+    title_slug = re.sub(r"[^\w\s-]", "", job.get("title") or "job")[:30].strip().replace(" ", "_")
+    prompt_file = config.LOG_DIR / f"prompt_{site_slug}_{title_slug}.txt"
     prompt_file.write_text(prompt, encoding="utf-8")
 
     # Write MCP config for reference
@@ -305,10 +312,17 @@ def run_job(job: dict, port: int, worker_id: int = 0,
     """
     # Read tailored resume text
     resume_path = job.get("tailored_resume_path")
+    if not resume_path or not Path(resume_path).exists():
+        if config.RESUME_PATH.exists():
+            resume_path = str(config.RESUME_PATH)
+            job["tailored_resume_path"] = resume_path
+
     txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
     resume_text = ""
-    if txt_path and txt_path.exists():
+    if txt_path and txt_path.exists() and txt_path.stat().st_size > 0:
         resume_text = txt_path.read_text(encoding="utf-8")
+    elif config.RESUME_PATH.exists():
+        resume_text = config.RESUME_PATH.read_text(encoding="utf-8")
 
     # Build the prompt
     agent_prompt = prompt_mod.build_prompt(
