@@ -18,18 +18,18 @@ TECHNICAL SKILLS
 
 EXPERIENCE
 
+Innoscripta
+Backend Engineer | 07/2025 - present
+- Contributed to project planning, system design, and database schema architecture for digital services.
+- Integrated AI services and automated verification modules into backend workflows.
+- Developed high-performance Go microservices delivering sub-second response times.
+
 BattleBucks
 Team Lead | 04/2024 - 03/2025
 - Led technical team roadmap, OKR planning, and sprint execution as Scrum Master for esports gaming platform.
 - Architected the core multiplayer tournament SDK and real-time state synchronization framework.
 - Managed QA delivery coordination, ensuring zero-defect deployments across major version releases.
 - Optimized client memory footprint and data caching to guarantee steady 60 FPS on mid-tier mobile hardware.
-
-Innoscripta
-Backend Engineer | 04/2024 - 03/2025
-- Contributed to project planning, system design, and database schema architecture for digital services.
-- Integrated AI services and automated verification modules into backend workflows.
-- Developed high-performance Go microservices delivering sub-second response times.
 
 Altworld
 Senior Software Engineer | 10/2023 - 03/2024

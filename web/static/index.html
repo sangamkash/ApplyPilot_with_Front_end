@@ -721,7 +721,30 @@
               <option value="8">Score &ge; 8 (Exceptional)</option>
               <option value="7">Score &ge; 7 (Strong Match)</option>
               <option value="5">Score &ge; 5 (Relevant)</option>
+              <option value="3">Score &ge; 3 (Exploratory)</option>
             </select>
+          </div>
+        </div>
+
+        <!-- Floating Multi-Select Bulk Action Bar -->
+        <div id="bulkActionBar" class="bulk-action-bar hidden">
+          <div class="bulk-action-info">
+            <span class="bulk-pulse-indicator"></span>
+            <span class="bulk-label"><strong id="bulkSelectedCount">0</strong> jobs selected</span>
+          </div>
+          <div class="bulk-action-buttons">
+            <button id="btnBulkAutoApply" class="btn btn-sm btn-primary btn-glow">
+              ⚡ Auto Apply Selected (<span id="bulkApplyCount">0</span>)
+            </button>
+            <button id="btnBulkManualApply" class="btn btn-sm btn-outline">
+              🔗 Open Selected in Tabs
+            </button>
+            <button id="btnBulkMarkApplied" class="btn btn-sm btn-success">
+              ✓ Mark as Applied
+            </button>
+            <button id="btnBulkDeselect" class="btn btn-sm btn-ghost">
+              ✕ Deselect All
+            </button>
           </div>
         </div>
 
@@ -729,13 +752,16 @@
           <table class="jobs-table">
             <thead>
               <tr>
-                <th style="width: 70px;">Score</th>
-                <th>Job Title & Company</th>
+                <th style="width: 44px; text-align: center;">
+                  <input type="checkbox" id="selectAllJobsCheckbox" title="Select all visible jobs">
+                </th>
+                <th style="width: 65px;">Score</th>
+                <th>Job Title &amp; Company</th>
                 <th>Source</th>
                 <th>Location</th>
                 <th>Tailored Resume</th>
-                <th>Status</th>
-                <th style="text-align: right;">Actions</th>
+                <th style="min-width: 250px;">Status &amp; Milestones</th>
+                <th style="text-align: right; min-width: 210px;">Actions</th>
               </tr>
             </thead>
             <tbody id="jobsTableBody">
@@ -856,11 +882,11 @@
               <div class="form-grid-2">
                 <div class="form-group">
                   <label for="formLinkedin">LinkedIn Profile URL</label>
-                  <input type="url" id="formLinkedin" placeholder="https://linkedin.com/in/username">
+                  <input type="text" id="formLinkedin" placeholder="https://linkedin.com/in/username">
                 </div>
                 <div class="form-group">
                   <label for="formGithub">GitHub / Portfolio URL</label>
-                  <input type="url" id="formGithub" placeholder="https://github.com/username">
+                  <input type="text" id="formGithub" placeholder="https://github.com/username">
                 </div>
               </div>
             </div>
@@ -1003,7 +1029,12 @@
     <div class="modal-content modal-lg">
       <div class="modal-header">
         <div class="modal-title-group">
-          <span class="badge badge-accent">Tailored Resume</span>
+          <div class="resume-badge-row">
+            <span class="badge badge-accent" id="modalResumeTypeBadge">Tailored ATS Resume</span>
+            <button id="btnRevertAiResume" class="btn btn-xs btn-outline-warning hidden">
+              ↺ Revert to AI Tailored
+            </button>
+          </div>
           <h2 id="modalResumeTitle">Resume Viewer</h2>
           <span class="modal-subtitle" id="modalResumeFilename">file.txt</span>
         </div>
@@ -1015,6 +1046,7 @@
           <button class="subtab-btn active" data-subtab="formatted">Formatted ATS Preview</button>
           <button class="subtab-btn" data-subtab="raw">Raw Text</button>
           <button class="subtab-btn" data-subtab="report">Tailoring Report (AI)</button>
+          <button class="subtab-btn highlight-tab" data-subtab="custom-replace">✏️ Replace with Custom Resume</button>
         </div>
 
         <div class="download-actions">
@@ -1039,6 +1071,44 @@
         </div>
         <div class="subtab-content" id="subtab-report">
           <div class="report-box" id="resumeReportContent"></div>
+        </div>
+        <!-- TAB 4: Custom Resume Editor / File Upload -->
+        <div class="subtab-content" id="subtab-custom-replace">
+          <div class="custom-replace-panel">
+            <div class="custom-replace-hero">
+              <div class="custom-replace-icon">📄</div>
+              <div>
+                <h3>Replace with Custom ATS Resume</h3>
+                <p class="text-dim text-sm">
+                  Upload your own custom resume file (.txt, .md) or paste/edit your resume content below. This resume will be saved as the active ATS resume for this job application.
+                </p>
+              </div>
+            </div>
+
+            <div class="custom-upload-zone" id="customResumeDropZone">
+              <input type="file" id="customResumeFileInput" accept=".txt,.md,.pdf,.doc,.docx" style="display: none;">
+              <div class="upload-drop-content">
+                <span class="upload-icon">📁</span>
+                <p>Drag and drop a custom resume file here, or <button type="button" class="btn-link" id="btnBrowseCustomResume">browse files</button></p>
+                <span class="text-xs text-dim">Supported: Plain text (.txt), Markdown (.md)</span>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 15px;">
+              <label for="customResumeTextarea" class="form-label" style="display: flex; justify-content: space-between;">
+                <span>Resume Content (Plain Text ATS Format)</span>
+                <span id="customResumeCharCount" class="text-xs text-dim">0 characters</span>
+              </label>
+              <textarea id="customResumeTextarea" class="form-textarea code-editor-font" rows="14" placeholder="Paste or edit your custom resume here..."></textarea>
+            </div>
+
+            <div class="custom-replace-footer">
+              <div id="customReplaceAlert" class="alert-box hidden"></div>
+              <button id="btnSaveCustomResume" class="btn btn-primary">
+                💾 Save &amp; Set as Active Resume for Job
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

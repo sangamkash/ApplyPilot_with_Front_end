@@ -18,7 +18,7 @@ TECHNICAL SKILLS
 EXPERIENCE
 
 Innoscripta
-Backend Engineer | 04/2024 - 03/2025
+Backend Engineer | 08/2025 - present
 - Architected and deployed Go-based microservices for digital signature applications, achieving sub-second request handling under concurrent traffic.
 - Engineered AI integration pipelines connecting local and cloud LLM endpoints for automated document classification and payload extraction.
 - Structured relational schemas in PostgreSQL and optimized SQL queries, cutting p95 response latencies by 35%.

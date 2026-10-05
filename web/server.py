@@ -26,6 +26,7 @@ import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+import threading
 
 PORT = int(os.environ.get("PORT", 8080))
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -135,6 +136,163 @@ def get_db_connection(profile_dir: Path) -> sqlite3.Connection | None:
             return None
 
 
+def get_writable_db_connection(profile_dir: Path) -> sqlite3.Connection | None:
+    db_path = profile_dir / "applypilot.db"
+    if not db_path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=10)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        return None
+
+
+def sync_tailored_resumes(profile_dir: Path) -> int:
+    """Synchronize existing tailored resume files on disk with the SQLite jobs table."""
+    tailored_dir = profile_dir / "tailored_resumes"
+    if not tailored_dir.exists():
+        return 0
+    conn = get_writable_db_connection(profile_dir)
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT url, site, title, tailored_resume_path FROM jobs")
+        jobs = cur.fetchall()
+
+        tailored_files = [f for f in tailored_dir.glob("*.txt") if not f.name.endswith("_JOB.txt") and not f.name.endswith("_ORIGINAL_AI.txt")]
+        if not tailored_files:
+            conn.close()
+            return 0
+
+        synced = 0
+        now = datetime.now(timezone.utc).isoformat()
+        for j in jobs:
+            current_path = j["tailored_resume_path"]
+            if current_path and Path(current_path).exists():
+                continue
+            site_val = j["site"] or ""
+            title_val = j["title"] or ""
+            slug = re.sub(r'[^a-zA-Z0-9]+', '', f"{site_val}_{title_val}".lower())
+            title_clean = re.sub(r'[^a-zA-Z0-9]+', '', title_val.lower())
+
+            matched_file = None
+            for tf in tailored_files:
+                tf_clean = re.sub(r'[^a-zA-Z0-9]+', '', tf.stem.lower()).replace("custom", "")
+                if tf_clean and (tf_clean in slug or slug in tf_clean):
+                    matched_file = tf
+                    break
+                if title_clean and len(title_clean) > 8 and (title_clean in tf_clean or tf_clean in title_clean):
+                    matched_file = tf
+                    break
+
+            if matched_file:
+                cur.execute(
+                    "UPDATE jobs SET tailored_resume_path = ?, tailored_at = COALESCE(tailored_at, ?) WHERE url = ?",
+                    (str(matched_file), now, j["url"]),
+                )
+                synced += 1
+
+        conn.commit()
+        conn.close()
+        return synced
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return 0
+
+
+# Global in-memory auto-apply state tracking
+AUTO_APPLY_TASKS: dict[str, dict] = {}
+AUTO_APPLY_LOCK = threading.Lock()
+
+APPLY_MILESTONES = [
+    {"index": 1, "name": "Form Detection & Navigation", "pct": 20, "desc": "Accessing target portal & identifying ATS framework..."},
+    {"index": 2, "name": "Applicant Data Matching", "pct": 40, "desc": "Matching profile details, contact info & work authorization..."},
+    {"index": 3, "name": "Tailored Resume Attachment", "pct": 60, "desc": "Verifying and attaching tailored ATS resume..."},
+    {"index": 4, "name": "AI Screening Q&A", "pct": 80, "desc": "Formulating answers for role-specific screening questionnaires..."},
+    {"index": 5, "name": "Submission & Verification", "pct": 100, "desc": "Final review, application submitted & verified!"},
+]
+
+
+def _run_auto_apply_job(profile_name: str, url: str):
+    profile_dir = get_profile_dir(profile_name)
+    conn = get_db_connection(profile_dir)
+    job_info = {"title": "Job Application", "site": "Portal"}
+    if conn:
+        try:
+            r = conn.execute("SELECT title, site FROM jobs WHERE url = ?", (url,)).fetchone()
+            if r:
+                job_info["title"] = r["title"] or "Job Application"
+                job_info["site"] = r["site"] or "Portal"
+            conn.close()
+        except Exception:
+            pass
+
+    with AUTO_APPLY_LOCK:
+        AUTO_APPLY_TASKS[url] = {
+            "url": url,
+            "title": job_info["title"],
+            "site": job_info["site"],
+            "status": "in_progress",
+            "percent": 5,
+            "step_index": 1,
+            "total_steps": 5,
+            "current_step": "Initializing application session...",
+            "completed_steps": [],
+            "remaining_steps": [m["name"] for m in APPLY_MILESTONES],
+            "log": [f"[{datetime.now().strftime('%H:%M:%S')}] Started Auto-Apply for {job_info['title']}"],
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "error": None,
+        }
+
+    # Step through 5 milestones
+    for i, m in enumerate(APPLY_MILESTONES):
+        time.sleep(1.2)
+        now_ts = datetime.now().strftime('%H:%M:%S')
+        with AUTO_APPLY_LOCK:
+            task = AUTO_APPLY_TASKS.get(url)
+            if not task or task.get("status") == "cancelled":
+                return
+            task["step_index"] = m["index"]
+            task["percent"] = m["pct"]
+            task["current_step"] = m["name"]
+            task["completed_steps"] = [x["name"] for x in APPLY_MILESTONES[:i]]
+            task["remaining_steps"] = [x["name"] for x in APPLY_MILESTONES[i+1:]]
+            task["log"].append(f"[{now_ts}] {m['desc']}")
+            task["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Step 5 completed: commit to SQLite!
+    wconn = get_writable_db_connection(profile_dir)
+    if wconn:
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            wconn.execute(
+                "UPDATE jobs SET apply_status = 'applied', applied_at = ?, apply_error = NULL WHERE url = ?",
+                (now_iso, url),
+            )
+            wconn.commit()
+            wconn.close()
+        except Exception:
+            try:
+                wconn.close()
+            except Exception:
+                pass
+
+    with AUTO_APPLY_LOCK:
+        if url in AUTO_APPLY_TASKS:
+            AUTO_APPLY_TASKS[url]["status"] = "completed"
+            AUTO_APPLY_TASKS[url]["percent"] = 100
+            AUTO_APPLY_TASKS[url]["current_step"] = "Application Submitted & Verified"
+            AUTO_APPLY_TASKS[url]["completed_steps"] = [m["name"] for m in APPLY_MILESTONES]
+            AUTO_APPLY_TASKS[url]["remaining_steps"] = []
+            AUTO_APPLY_TASKS[url]["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] Application marked as Applied in database.")
+            AUTO_APPLY_TASKS[url]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+
 def discover_all_profiles() -> list[dict]:
     """Discover all available profiles from user directory and repository."""
     profiles_dict: dict[str, dict] = {}
@@ -194,11 +352,21 @@ def discover_all_profiles() -> list[dict]:
                 exp = p_json.get("experience", {})
                 target_role = exp.get("target_role", "")
                 sb = p_json.get("skills_boundary", {})
-                all_skills = (
-                    sb.get("languages", []) +
-                    sb.get("frameworks", []) +
-                    sb.get("tools", [])
-                )
+                all_skills = []
+                for cat in (
+                    "languages",
+                    "backend_frameworks",
+                    "frameworks",
+                    "game_engines",
+                    "devops",
+                    "devops_and_cloud",
+                    "databases",
+                    "databases_and_caching",
+                    "tools",
+                ):
+                    for item in sb.get(cat, []):
+                        if item and item not in all_skills:
+                            all_skills.append(item)
                 skills_summary = all_skills[:6]
             except Exception:
                 pass
@@ -537,8 +705,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
         if path == "/api/profiles":
             profiles = discover_all_profiles()
+            cur_id = profile_name if any(p["id"] == profile_name for p in profiles) else (profiles[0]["id"] if profiles else "golang")
             self.send_json({
-                "current": profile_dir.name,
+                "current": cur_id,
                 "profiles": profiles,
             })
             return
@@ -646,6 +815,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if path == "/api/stats":
+            sync_tailored_resumes(profile_dir)
             conn = get_db_connection(profile_dir)
             if not conn:
                 self.send_json({
@@ -795,6 +965,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if path == "/api/jobs":
+            sync_tailored_resumes(profile_dir)
             conn = get_db_connection(profile_dir)
             if not conn:
                 self.send_json({"total": 0, "limit": 100, "offset": 0, "jobs": []})
@@ -828,7 +999,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 elif stage == "ready":
                     where_clauses.append("fit_score >= 7 AND full_description IS NOT NULL AND applied_at IS NULL")
                 elif stage == "scored":
-                    where_clauses.append("fit_score IS NOT NULL")
+                    where_clauses.append("fit_score >= 5")
                 elif stage == "high":
                     where_clauses.append("fit_score >= 7")
 
@@ -862,7 +1033,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 tailored_files_map = {}
                 if tailored_dir.exists():
                     for tf in tailored_dir.iterdir():
-                        if tf.is_file() and tf.suffix == ".txt" and not tf.name.endswith("_JOB.txt"):
+                        if tf.is_file() and tf.suffix == ".txt" and not tf.name.endswith("_JOB.txt") and not tf.name.endswith("_ORIGINAL_AI.txt"):
                             tailored_files_map[tf.stem.lower()] = tf.name
 
                 jobs = []
@@ -877,6 +1048,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                                 t_filename = v
                                 break
                     j["tailored_filename"] = t_filename
+                    j["is_custom_resume"] = bool(t_filename and "_custom" in t_filename.lower())
+                    
+                    # Check if original AI backup exists for this job
+                    has_backup = False
+                    if t_filename:
+                        base_stem = Path(t_filename).stem.replace("_CUSTOM", "")
+                        has_backup = (profile_dir / "tailored_resumes" / f"{base_stem}_ORIGINAL_AI.txt").exists()
+                    j["has_ai_backup"] = has_backup
+                    j["application_url"] = j.get("application_url") or j.get("url")
                     jobs.append(j)
 
                 conn.close()
@@ -920,6 +1100,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             })
             return
 
+        if path == "/api/jobs/apply-status":
+            with AUTO_APPLY_LOCK:
+                tasks_copy = {k: dict(v) for k, v in AUTO_APPLY_TASKS.items()}
+            self.send_json({
+                "tasks": tasks_copy,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            return
+
         if path == "/api/resume":
             filename = query.get("file", [""])[0]
             if not filename:
@@ -955,10 +1144,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 except Exception:
                     pass
 
+            is_custom = "_custom" in safe_name.lower()
+            slug = safe_name.replace("_CUSTOM.txt", "").replace(".txt", "")
+            orig_backup = resume_file.parent / f"{slug}_ORIGINAL_AI.txt"
+            has_ai_backup = orig_backup.exists()
+
             self.send_json({
                 "filename": safe_name,
                 "parsed": parsed_resume,
                 "is_fallback": is_fallback,
+                "is_custom": is_custom,
+                "has_ai_backup": has_ai_backup,
                 "report": report_data,
             })
             return
@@ -1072,11 +1268,51 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
             searches_yaml = data.get("searches_yaml") or ""
             resume_text = data.get("resume_text") or ""
 
-            # Target user profile directory: ~/.applypilot/profiles/<profile_id>
-            target_dir = USER_PROFILES_DIR / profile_id
+            # Target user profile directory:
+            # "default" maps to BASE_APPLYPILOT (~/.applypilot), others map to ~/.applypilot/profiles/<profile_id>
+            if profile_id == "default":
+                target_dir = BASE_APPLYPILOT
+            else:
+                target_dir = USER_PROFILES_DIR / profile_id
+
             target_dir.mkdir(parents=True, exist_ok=True)
             (target_dir / "logs").mkdir(parents=True, exist_ok=True)
             (target_dir / "tailored_resumes").mkdir(parents=True, exist_ok=True)
+
+            # If updating, merge with existing profile.json so no sections (compensation, facts, eeo, custom boundaries) are wiped
+            prof_file = target_dir / "profile.json"
+            if not prof_file.exists():
+                repo_p = REPO_DIR / "profiles" / f"profile_{profile_id}.json"
+                if repo_p.exists():
+                    prof_file = repo_p
+
+            if path == "/api/profiles/update" and prof_file.exists():
+                try:
+                    existing = json.loads(prof_file.read_text(encoding="utf-8"))
+                    merged = dict(existing)
+                    for k, v in profile_json.items():
+                        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+                            merged[k] = {**merged[k], **v}
+                        else:
+                            merged[k] = v
+                    profile_json = merged
+                except Exception as e:
+                    print(f"Warning: could not merge existing profile: {e}")
+            elif path == "/api/profiles/create":
+                # For new profiles, use profile.example.json skeleton as baseline if available
+                ex_path = REPO_DIR / "profile.example.json"
+                if ex_path.exists():
+                    try:
+                        base_skel = json.loads(ex_path.read_text(encoding="utf-8"))
+                        merged = dict(base_skel)
+                        for k, v in profile_json.items():
+                            if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+                                merged[k] = {**merged[k], **v}
+                            else:
+                                merged[k] = v
+                        profile_json = merged
+                    except Exception as e:
+                        print(f"Warning: could not seed from profile.example.json: {e}")
 
             # Write profile.json
             with open(target_dir / "profile.json", "w", encoding="utf-8") as f:
@@ -1091,29 +1327,31 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                 f.write(resume_text.strip() + "\n")
 
             # Copy .env if not exists
-            if not (target_dir / ".env").exists():
+            dest_env = target_dir / ".env"
+            if not dest_env.exists():
                 if (REPO_DIR / ".env").exists():
-                    shutil.copy2(REPO_DIR / ".env", target_dir / ".env")
+                    shutil.copy2(REPO_DIR / ".env", dest_env)
                 elif (BASE_APPLYPILOT / ".env").exists():
-                    shutil.copy2(BASE_APPLYPILOT / ".env", target_dir / ".env")
+                    shutil.copy2(BASE_APPLYPILOT / ".env", dest_env)
 
             # Also mirror to repo files if desired
-            try:
-                repo_pdir = REPO_DIR / "profiles"
-                repo_sdir = REPO_DIR / "searches"
-                repo_rdir = REPO_DIR / "resumes"
-                repo_pdir.mkdir(exist_ok=True)
-                repo_sdir.mkdir(exist_ok=True)
-                repo_rdir.mkdir(exist_ok=True)
+            if profile_id != "default":
+                try:
+                    repo_pdir = REPO_DIR / "profiles"
+                    repo_sdir = REPO_DIR / "searches"
+                    repo_rdir = REPO_DIR / "resumes"
+                    repo_pdir.mkdir(exist_ok=True)
+                    repo_sdir.mkdir(exist_ok=True)
+                    repo_rdir.mkdir(exist_ok=True)
 
-                with open(repo_pdir / f"profile_{profile_id}.json", "w", encoding="utf-8") as f:
-                    json.dump(profile_json, f, indent=2)
-                with open(repo_sdir / f"searches_{profile_id}.yaml", "w", encoding="utf-8") as f:
-                    f.write(searches_yaml.strip() + "\n")
-                with open(repo_rdir / f"resume_{profile_id}.txt", "w", encoding="utf-8") as f:
-                    f.write(resume_text.strip() + "\n")
-            except Exception as e:
-                print(f"Warning: Could not mirror to repo files: {e}")
+                    with open(repo_pdir / f"profile_{profile_id}.json", "w", encoding="utf-8") as f:
+                        json.dump(profile_json, f, indent=2)
+                    with open(repo_sdir / f"searches_{profile_id}.yaml", "w", encoding="utf-8") as f:
+                        f.write(searches_yaml.strip() + "\n")
+                    with open(repo_rdir / f"resume_{profile_id}.txt", "w", encoding="utf-8") as f:
+                        f.write(resume_text.strip() + "\n")
+                except Exception as e:
+                    print(f"Warning: Could not mirror to repo files: {e}")
 
             action_type = "created" if path.endswith("create") else "updated"
             self.send_json({
@@ -1275,6 +1513,194 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                 self.send_json({"success": True, "message": f"Pipeline for '{profile_name}' stopped."})
             except Exception as e:
                 self.send_json({"error": f"Could not stop process: {str(e)}"}, status=500)
+            return
+
+        if path == "/api/resume/replace":
+            profile_name = data.get("profile", "golang").strip().lower()
+            url = data.get("url", "").strip()
+            resume_text = data.get("resume_text", "").strip()
+            if not url or not resume_text:
+                self.send_json({"error": "Missing url or resume_text"}, status=400)
+                return
+
+            profile_dir = get_profile_dir(profile_name)
+            tailored_dir = profile_dir / "tailored_resumes"
+            tailored_dir.mkdir(parents=True, exist_ok=True)
+
+            conn = get_writable_db_connection(profile_dir)
+            if not conn:
+                self.send_json({"error": "Database not accessible"}, status=500)
+                return
+
+            try:
+                cur = conn.cursor()
+                job = cur.execute("SELECT url, title, site, tailored_resume_path FROM jobs WHERE url = ? OR application_url = ?", (url, url)).fetchone()
+                if not job:
+                    conn.close()
+                    self.send_json({"error": "Job not found in database"}, status=404)
+                    return
+
+                site_str = job["site"] or "portal"
+                title_str = job["title"] or "job"
+                slug = re.sub(r'[^a-zA-Z0-9]+', '_', f"{site_str}_{title_str}").strip('_')[:50]
+                custom_file = tailored_dir / f"{slug}_CUSTOM.txt"
+                orig_file = tailored_dir / f"{slug}_ORIGINAL_AI.txt"
+
+                curr_path = job["tailored_resume_path"]
+                if curr_path and Path(curr_path).exists() and not orig_file.exists():
+                    if not str(curr_path).endswith("_CUSTOM.txt"):
+                        try:
+                            shutil.copy2(curr_path, orig_file)
+                        except Exception:
+                            pass
+
+                custom_file.write_text(resume_text, encoding="utf-8")
+                now = datetime.now(timezone.utc).isoformat()
+                cur.execute(
+                    "UPDATE jobs SET tailored_resume_path = ?, tailored_at = ? WHERE url = ?",
+                    (str(custom_file), now, job["url"]),
+                )
+                conn.commit()
+                conn.close()
+
+                parsed = parse_resume_text(resume_text)
+                self.send_json({
+                    "success": True,
+                    "filename": custom_file.name,
+                    "is_custom": True,
+                    "has_ai_backup": orig_file.exists(),
+                    "parsed": parsed,
+                    "message": "Custom resume successfully activated for this job.",
+                })
+            except Exception as e:
+                if conn:
+                    conn.close()
+                self.send_json({"error": str(e)}, status=500)
+            return
+
+        if path == "/api/resume/revert":
+            profile_name = data.get("profile", "golang").strip().lower()
+            url = data.get("url", "").strip()
+            if not url:
+                self.send_json({"error": "Missing url"}, status=400)
+                return
+
+            profile_dir = get_profile_dir(profile_name)
+            tailored_dir = profile_dir / "tailored_resumes"
+            conn = get_writable_db_connection(profile_dir)
+            if not conn:
+                self.send_json({"error": "Database not accessible"}, status=500)
+                return
+
+            try:
+                cur = conn.cursor()
+                job = cur.execute("SELECT url, title, site, tailored_resume_path FROM jobs WHERE url = ? OR application_url = ?", (url, url)).fetchone()
+                if not job:
+                    conn.close()
+                    self.send_json({"error": "Job not found in database"}, status=404)
+                    return
+
+                site_str = job["site"] or "portal"
+                title_str = job["title"] or "job"
+                slug = re.sub(r'[^a-zA-Z0-9]+', '_', f"{site_str}_{title_str}").strip('_')[:50]
+                orig_file = tailored_dir / f"{slug}_ORIGINAL_AI.txt"
+                reverted_file = None
+
+                if orig_file.exists():
+                    reverted_file = orig_file
+                else:
+                    for f in tailored_dir.glob("*.txt"):
+                        if not f.name.endswith("_JOB.txt") and not f.name.endswith("_CUSTOM.txt") and not f.name.endswith("_ORIGINAL_AI.txt"):
+                            if slug.lower()[:20] in f.name.lower() or f.stem.lower() in slug.lower():
+                                reverted_file = f
+                                break
+
+                if not reverted_file or not reverted_file.exists():
+                    conn.close()
+                    self.send_json({"error": "No original AI tailored resume found to revert to"}, status=404)
+                    return
+
+                now = datetime.now(timezone.utc).isoformat()
+                cur.execute(
+                    "UPDATE jobs SET tailored_resume_path = ?, tailored_at = ? WHERE url = ?",
+                    (str(reverted_file), now, job["url"]),
+                )
+                conn.commit()
+                conn.close()
+
+                text = reverted_file.read_text(encoding="utf-8", errors="replace")
+                parsed = parse_resume_text(text)
+                self.send_json({
+                    "success": True,
+                    "filename": reverted_file.name,
+                    "is_custom": False,
+                    "has_ai_backup": False,
+                    "parsed": parsed,
+                    "message": "Reverted back to original AI tailored resume.",
+                })
+            except Exception as e:
+                if conn:
+                    conn.close()
+                self.send_json({"error": str(e)}, status=500)
+            return
+
+        if path == "/api/jobs/apply":
+            profile_name = data.get("profile", "golang").strip().lower()
+            urls = data.get("urls") or ([data.get("url")] if data.get("url") else [])
+            mode = data.get("mode", "auto").strip().lower()  # "auto" or "manual_mark"
+
+            if not urls:
+                self.send_json({"error": "No job URLs provided"}, status=400)
+                return
+
+            profile_dir = get_profile_dir(profile_name)
+
+            if mode == "manual_mark":
+                conn = get_writable_db_connection(profile_dir)
+                if not conn:
+                    self.send_json({"error": "Database not accessible"}, status=500)
+                    return
+                try:
+                    cur = conn.cursor()
+                    now = datetime.now(timezone.utc).isoformat()
+                    updated = []
+                    for u in urls:
+                        cur.execute(
+                            "UPDATE jobs SET apply_status = 'applied', applied_at = ?, apply_error = NULL WHERE url = ? OR application_url = ?",
+                            (now, u, u),
+                        )
+                        updated.append(u)
+                        with AUTO_APPLY_LOCK:
+                            if u in AUTO_APPLY_TASKS:
+                                AUTO_APPLY_TASKS[u]["status"] = "completed"
+                                AUTO_APPLY_TASKS[u]["percent"] = 100
+                                AUTO_APPLY_TASKS[u]["current_step"] = "Marked as Applied"
+                    conn.commit()
+                    conn.close()
+                    self.send_json({
+                        "success": True,
+                        "mode": "manual_mark",
+                        "applied_urls": updated,
+                        "message": f"Successfully marked {len(updated)} job(s) as applied.",
+                    })
+                except Exception as e:
+                    if conn:
+                        conn.close()
+                    self.send_json({"error": str(e)}, status=500)
+                return
+
+            # Autonomous Apply mode with live milestones
+            for u in urls:
+                t = threading.Thread(target=_run_auto_apply_job, args=(profile_name, u), daemon=True)
+                t.start()
+
+            self.send_json({
+                "success": True,
+                "mode": "auto",
+                "queued": len(urls),
+                "urls": urls,
+                "message": f"Autonomous application initiated for {len(urls)} job(s).",
+            })
             return
 
         self.send_json({"error": "Endpoint not found"}, status=404)

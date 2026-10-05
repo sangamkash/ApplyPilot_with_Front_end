@@ -1,8 +1,9 @@
-# ApplyPilot Search Configuration - Golang Backend Developer (AI-related)
-# Target regions: Germany, Switzerland, United States, and Nordic Countries (Sweden, Norway, Denmark, Finland)
+defaults:
+  distance: 0
+  hours_old: 72
+  results_per_site: 50
 
 queries:
-  # Tier 1: Exact high-priority matches
   - query: "golang backend engineer"
     tier: 1
   - query: "go backend developer"
@@ -13,32 +14,26 @@ queries:
     tier: 1
   - query: "backend engineer ai integration"
     tier: 1
-
-  # Tier 2: Strong matches, system design & distributed systems
   - query: "golang distributed systems"
-    tier: 2
+    tier: 1
   - query: "senior backend engineer redis kafka"
-    tier: 2
+    tier: 1
   - query: "backend engineer microservices go"
-    tier: 2
+    tier: 1
   - query: "staff backend engineer go"
-    tier: 2
+    tier: 1
   - query: "platform engineer golang"
-    tier: 2
-
-  # Tier 3: Wider net
+    tier: 1
   - query: "senior backend developer"
-    tier: 3
+    tier: 1
   - query: "software engineer golang"
-    tier: 3
+    tier: 1
   - query: "distributed systems engineer"
-    tier: 3
+    tier: 1
   - query: "backend engineer sql mongodb"
-    tier: 3
+    tier: 1
 
-# Target search locations
 locations:
-  # Germany
   - location: "Berlin, Germany"
     remote: false
   - location: "Munich, Germany"
@@ -47,16 +42,12 @@ locations:
     remote: false
   - location: "Germany"
     remote: false
-
-  # Switzerland
   - location: "Zurich, Switzerland"
     remote: false
   - location: "Geneva, Switzerland"
     remote: false
   - location: "Switzerland"
     remote: false
-
-  # United States
   - location: "San Francisco, CA"
     remote: false
   - location: "New York, NY"
@@ -65,8 +56,6 @@ locations:
     remote: false
   - location: "United States"
     remote: false
-
-  # Nordic Countries
   - location: "Stockholm, Sweden"
     remote: false
   - location: "Sweden"
@@ -83,70 +72,5 @@ locations:
     remote: false
   - location: "Finland"
     remote: false
-
-  # Remote
   - location: "Remote"
     remote: true
-
-# Location pattern filters
-location:
-  accept_patterns:
-    - "Germany"
-    - "Berlin"
-    - "Munich"
-    - "Frankfurt"
-    - "Hamburg"
-    - "Switzerland"
-    - "Zurich"
-    - "Geneva"
-    - "United States"
-    - "USA"
-    - "US"
-    - "San Francisco"
-    - "New York"
-    - "Seattle"
-    - "California"
-    - "Sweden"
-    - "Stockholm"
-    - "Norway"
-    - "Oslo"
-    - "Denmark"
-    - "Copenhagen"
-    - "Finland"
-    - "Helsinki"
-    - "Nordic"
-    - "Europe"
-    - "Remote"
-    - "Worldwide"
-    - "Anywhere"
-  reject_patterns:
-    - "onsite only"
-    - "clearance required"
-    - "must be citizen"
-    - "no sponsorship"
-
-# Country for Indeed search (usa, germany, switzerland, etc.)
-country: "germany"
-
-# Boards to search
-boards:
-  - linkedin
-  - indeed
-  - glassdoor
-  - google
-
-# Search defaults
-defaults:
-  results_per_site: 50
-  hours_old: 72
-
-# Negative keywords in titles
-exclude_titles:
-  - "intern"
-  - "internship"
-  - "junior"
-  - "entry level"
-  - "co-op"
-  - "security clearance"
-  - "vice president"
-  - "sales engineer"

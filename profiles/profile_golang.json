@@ -97,6 +97,10 @@
       "Grafana",
       "Benchmarking tools",
       "Analytics architecture"
+    ],
+    "tools": [
+      "Git",
+      "Linux"
     ]
   },
   "resume_facts": {

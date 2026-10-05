@@ -100,6 +100,22 @@
       "Visual Studio",
       "RenderDoc",
       "Jira"
+    ],
+    "devops": [
+      "Git",
+      "Unity Profiler",
+      "Visual Studio",
+      "RenderDoc",
+      "Jira"
+    ],
+    "databases": [
+      "MultiPlayer architecture",
+      "Photon PUN",
+      "Photon Quantum",
+      "Nakama",
+      "WebSockets",
+      "State synchronization",
+      "Lag compensation"
     ]
   },
   "resume_facts": {
