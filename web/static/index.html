@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ApplyPilot - Live Autonomous Job & Application Command Center</title>
+  <title>ApplyPilot - Autonomous Job Search & Application Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -11,49 +11,67 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- Top Header -->
+    <!-- Top Global Header -->
     <header class="app-header">
-      <div class="brand">
+      <div class="brand" id="brandLogoBtn" title="Back to Homepage">
         <div class="brand-icon">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
           </svg>
         </div>
         <div class="brand-text">
-          <h1>ApplyPilot <span>Live</span></h1>
-          <p>Autonomous Application & Pipeline Dashboard</p>
+          <h1>ApplyPilot <span>Autonomous</span></h1>
+          <p>Multi-Profile Job Search & Application Engine</p>
         </div>
       </div>
 
+      <!-- Main Navigation Views Switcher -->
+      <nav class="nav-views" id="navViews">
+        <button class="nav-view-btn active" data-view="home" id="navBtnHome">
+          <span class="nav-icon">🏠</span> Profiles Hub
+        </button>
+        <button class="nav-view-btn" data-view="pipeline" id="navBtnPipeline">
+          <span class="nav-icon">⚡</span> Pipeline Control
+        </button>
+        <button class="nav-view-btn" data-view="monitor" id="navBtnMonitor">
+          <span class="nav-icon">📊</span> Live Monitor
+          <span class="nav-badge" id="navMonitorBadge">0</span>
+        </button>
+      </nav>
+
+      <!-- Global Controls -->
       <div class="header-controls">
-        <!-- Profile Switcher -->
+        <!-- Profile Quick Selector -->
         <div class="control-group">
-          <label for="profileSelect">Target Profile:</label>
+          <label for="globalProfileSelect">Active Profile:</label>
           <div class="select-wrapper">
-            <select id="profileSelect">
-              <option value="golang" selected>Golang Backend (Primary)</option>
+            <select id="globalProfileSelect">
+              <option value="golang">Golang Backend</option>
               <option value="gamedev">Game Development</option>
-              <option value="default">Global Profile</option>
+              <option value="default">Default Profile</option>
             </select>
           </div>
+          <button class="btn btn-primary btn-sm btn-icon-text" id="btnHeaderNewProfile" title="Create New Profile">
+            <span>+</span> New
+          </button>
         </div>
 
-        <!-- Refresh Controller -->
+        <!-- Refresh Controller & Live Indicator -->
         <div class="control-group live-indicator-group">
           <div class="live-pill" id="livePill">
             <span class="pulse-dot"></span>
-            <span id="liveStatusText">LIVE MONITORING</span>
+            <span id="liveStatusText">IDLE</span>
           </div>
           <div class="select-wrapper mini">
             <select id="refreshRateSelect">
-              <option value="2000" selected>Auto 2s</option>
-              <option value="5000">Auto 5s</option>
-              <option value="10000">Auto 10s</option>
-              <option value="0">Paused</option>
+              <option value="2000" selected>2s</option>
+              <option value="5000">5s</option>
+              <option value="10000">10s</option>
+              <option value="0">Off</option>
             </select>
           </div>
-          <button class="btn btn-secondary btn-icon" id="btnManualRefresh" title="Refresh Now">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="btn btn-secondary btn-icon" id="btnManualRefresh" title="Refresh Telemetry">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
           </button>
@@ -61,295 +79,926 @@
       </div>
     </header>
 
-    <!-- Real-time Live Activity Banner -->
-    <section class="live-activity-banner" id="liveActivityBanner">
-      <div class="live-activity-card">
-        <div class="activity-header">
-          <div class="activity-title">
-            <span class="badge badge-pulse" id="processStatusBadge">CHECKING ENGINE...</span>
-            <h2 id="activeProcessTitle">Scanning Pipeline Status...</h2>
+    <!-- ========================================================================= -->
+    <!-- VIEW 1: HOMEPAGE (Profiles Hub, Selection & Management) -->
+    <!-- ========================================================================= -->
+    <main class="app-view active" id="view-home">
+      <!-- Hero Welcome Banner -->
+      <section class="home-hero">
+        <div class="hero-content">
+          <div class="hero-tag">
+            <span class="tag-glow"></span>
+            Multi-User & Multi-Career Job Automation
           </div>
-          <div class="activity-meta" id="activityMeta">
-            <span id="activityElapsed">Elapsed: --</span>
-            <span id="activityPid">PID: --</span>
-          </div>
+          <h2>Select or Create a Candidate Profile to Begin</h2>
+          <p>
+            Run autonomous discovery, LLM scoring, ATS-tailored resume generation, and browser applications for yourself, friends, or family.
+          </p>
         </div>
+      </section>
 
-        <div class="activity-body">
-          <div class="current-task-info">
-            <div class="info-row">
-              <span class="info-label">Active Stage:</span>
-              <span class="info-val highlight" id="activeStageVal">Initializing</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Current Search Queries:</span>
-              <span class="info-val" id="activeQueriesVal">"golang backend engineer", "distributed systems"</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Target Regions:</span>
-              <span class="info-val" id="activeRegionsVal">Germany, Switzerland, US, Nordics</span>
-            </div>
-            <div class="info-row">
-              <span class="info-label">Latest Engine Event:</span>
-              <span class="info-val mono text-cyan" id="latestEventVal">Connecting to ApplyPilot background stream...</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Key Metrics Grid -->
-    <section class="kpi-grid">
-      <div class="kpi-card" data-stage="discovered">
-        <div class="kpi-icon icon-cyan">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Discovered Jobs</span>
-          <div class="kpi-value" id="kpiDiscovered">0</div>
-          <span class="kpi-sub" id="kpiEnrichedSub">0 enriched</span>
-        </div>
-      </div>
-
-      <div class="kpi-card" data-stage="scored">
-        <div class="kpi-icon icon-violet">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-          </svg>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Scored by LLM</span>
-          <div class="kpi-value" id="kpiScored">0</div>
-          <span class="kpi-sub" id="kpiAvgScoreSub">Avg Score: --</span>
-        </div>
-      </div>
-
-      <div class="kpi-card highlight-card" data-stage="tailored">
-        <div class="kpi-icon icon-amber">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-          </svg>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Tailored Resumes</span>
-          <div class="kpi-value" id="kpiTailored">0</div>
-          <span class="kpi-sub" id="kpiPendingTailorSub">0 pending high-fit</span>
-        </div>
-      </div>
-
-      <div class="kpi-card ready-card" data-stage="ready">
-        <div class="kpi-icon icon-blue">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-          </svg>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Ready to Apply</span>
-          <div class="kpi-value" id="kpiReady">0</div>
-          <span class="kpi-sub">Min score & URL valid</span>
-        </div>
-      </div>
-
-      <div class="kpi-card success-card" data-stage="applied">
-        <div class="kpi-icon icon-emerald">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-          </svg>
-        </div>
-        <div class="kpi-content">
-          <span class="kpi-label">Jobs Applied</span>
-          <div class="kpi-value" id="kpiApplied">0</div>
-          <span class="kpi-sub text-emerald" id="kpiAppliedSub">0 submissions</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- Interactive Analytics Row -->
-    <section class="analytics-row">
-      <!-- Score Distribution Bar Chart -->
-      <div class="analytics-card score-dist-card">
-        <div class="card-head">
-          <h3>Score Distribution (0 - 10)</h3>
-          <span class="hint">Click a score bar to filter jobs</span>
-        </div>
-        <div class="score-bars-container" id="scoreBarsContainer">
-          <!-- Filled dynamically by JavaScript -->
-          <div class="loading-placeholder">Loading score distribution...</div>
-        </div>
-      </div>
-
-      <!-- Jobs By Source -->
-      <div class="analytics-card sources-card">
-        <div class="card-head">
-          <h3>Jobs Discovered by Source / Portal</h3>
-          <span class="hint" id="totalSitesCount">-- sites</span>
-        </div>
-        <div class="sources-list" id="sourcesList">
-          <!-- Filled dynamically -->
-          <div class="loading-placeholder">Loading source portals...</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Navigation Tabs -->
-    <nav class="main-tabs">
-      <button class="tab-btn active" data-tab="tab-applied">
-        <span class="tab-icon">🚀</span>
-        Applied Jobs & Tailored Resumes
-        <span class="badge" id="tabAppliedCount">0</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-all-jobs">
-        <span class="tab-icon">📋</span>
-        All Discovered Jobs
-        <span class="badge" id="tabAllJobsCount">0</span>
-      </button>
-      <button class="tab-btn" data-tab="tab-live-feed">
-        <span class="tab-icon">⚡</span>
-        Live Activity & Engine Stream
-      </button>
-      <button class="tab-btn" data-tab="tab-search-config">
-        <span class="tab-icon">🎯</span>
-        Search Tiers & Config
-      </button>
-    </nav>
-
-    <!-- TAB 1: Applied Jobs & Tailored Resumes -->
-    <section class="tab-pane active" id="tab-applied">
-      <div class="section-toolbar">
-        <div class="search-box">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input type="text" id="appliedSearchInput" placeholder="Filter applied/tailored jobs by title, company...">
-        </div>
-        <div class="filter-group">
-          <button class="btn btn-sm btn-outline active" data-filter="all">All Available</button>
-          <button class="btn btn-sm btn-outline" data-filter="applied_only">Applied Only</button>
-          <button class="btn btn-sm btn-outline" data-filter="tailored_only">Tailored Resumes</button>
-        </div>
-      </div>
-
-      <div class="applied-jobs-grid" id="appliedJobsGrid">
-        <!-- Rendered dynamically -->
-        <div class="loading-state">
-          <div class="spinner"></div>
-          <p>Scanning database for applied and tailored jobs...</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 2: All Discovered Jobs -->
-    <section class="tab-pane" id="tab-all-jobs">
-      <div class="section-toolbar">
-        <div class="search-box">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input type="text" id="jobsSearchInput" placeholder="Search title, keywords, company, location...">
-        </div>
-
-        <div class="filters-row">
-          <select id="filterStageSelect" class="form-select">
-            <option value="all">All Stages</option>
-            <option value="applied">Applied</option>
-            <option value="tailored">Tailored Resume Ready</option>
-            <option value="ready">Ready to Apply (7+)</option>
-            <option value="high">High Fit (Score >= 7)</option>
-            <option value="scored">All Scored (>= 5)</option>
-          </select>
-
-          <select id="filterSiteSelect" class="form-select">
-            <option value="all">All Sites / Sources</option>
-          </select>
-
-          <select id="filterMinScoreSelect" class="form-select">
-            <option value="">Any Fit Score</option>
-            <option value="8">Score >= 8 (Exceptional)</option>
-            <option value="7">Score >= 7 (Strong Match)</option>
-            <option value="5">Score >= 5 (Relevant)</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="jobs-table-wrapper">
-        <table class="jobs-table">
-          <thead>
-            <tr>
-              <th style="width: 70px;">Score</th>
-              <th>Job Title & Company</th>
-              <th>Source</th>
-              <th>Location</th>
-              <th>Tailored Resume</th>
-              <th>Status</th>
-              <th style="text-align: right;">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="jobsTableBody">
-            <!-- Rendered dynamically -->
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- TAB 3: Live Feed & Engine Activity -->
-    <section class="tab-pane" id="tab-live-feed">
-      <div class="feed-container">
-        <div class="feed-left">
-          <div class="feed-card">
-            <h3>Active Background Processes</h3>
-            <div id="runningProcessList" class="process-list">
-              <p class="empty-text">No active processes detected.</p>
-            </div>
-          </div>
-
-          <div class="feed-card">
-            <h3>Recent Tailored Resume Files</h3>
-            <div id="recentTailoredList" class="recent-files-list">
-              <p class="empty-text">Scanning directory...</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="feed-right">
-          <div class="feed-card full-height">
-            <div class="terminal-head">
-              <div class="terminal-dots">
-                <span></span><span></span><span></span>
+      <!-- Active Profile Spotlight Card -->
+      <section class="spotlight-section">
+        <div class="spotlight-card" id="spotlightCard">
+          <div class="spotlight-header">
+            <div class="candidate-avatar" id="spotlightAvatar">SK</div>
+            <div class="candidate-info">
+              <div class="candidate-name-row">
+                <h3 id="spotlightName">Candidate Name</h3>
+                <span class="badge badge-accent" id="spotlightProfileId">golang</span>
+                <span class="badge badge-outline" id="spotlightSourceBadge">System</span>
               </div>
-              <span class="terminal-title">Real-Time Event Stream</span>
-              <button class="btn btn-sm btn-ghost" id="btnClearStream">Clear</button>
+              <div class="candidate-role" id="spotlightRole">Senior Golang Backend Engineer</div>
+              <div class="candidate-meta" id="spotlightMeta">📍 Location &bull; 💼 Experience</div>
             </div>
-            <div class="terminal-body" id="eventStreamLog">
-              <div class="log-line system">[SYSTEM] ApplyPilot live telemetry stream attached.</div>
+
+            <!-- Primary Spotlight Actions -->
+            <div class="spotlight-actions">
+              <button class="btn btn-primary btn-lg" id="btnSpotlightContinue">
+                ▶ Continue to Pipeline &rarr;
+              </button>
+              <button class="btn btn-outline" id="btnSpotlightOpenMonitor">
+                📊 Open Monitor
+              </button>
+              <button class="btn btn-secondary" id="btnSpotlightEdit" title="Edit Profile Details">
+                ✏️ Edit
+              </button>
+              <button class="btn btn-danger-ghost" id="btnSpotlightDelete" title="Delete Profile">
+                🗑️
+              </button>
+            </div>
+          </div>
+
+          <!-- Spotlight Metrics Row -->
+          <div class="spotlight-metrics-grid">
+            <div class="spotlight-metric">
+              <span class="metric-num text-cyan" id="spotlightDiscoveredCount">0</span>
+              <span class="metric-label">Jobs Discovered</span>
+            </div>
+            <div class="spotlight-metric">
+              <span class="metric-num text-violet" id="spotlightScoredCount">0</span>
+              <span class="metric-label">Scored by LLM</span>
+            </div>
+            <div class="spotlight-metric">
+              <span class="metric-num text-amber" id="spotlightTailoredCount">0</span>
+              <span class="metric-label">Tailored Resumes</span>
+            </div>
+            <div class="spotlight-metric">
+              <span class="metric-num text-emerald" id="spotlightAppliedCount">0</span>
+              <span class="metric-label">Submissions</span>
+            </div>
+            <div class="spotlight-metric spotlight-error-metric" id="spotlightErrorCard">
+              <span class="metric-num text-rose" id="spotlightErrorsCount">0</span>
+              <span class="metric-label">Application Errors</span>
+            </div>
+          </div>
+
+          <!-- Spotlight Tags & Config Summary -->
+          <div class="spotlight-footer">
+            <div class="spotlight-skills-group">
+              <span class="footer-label">Key Strengths & Skills:</span>
+              <div class="skills-tags-list" id="spotlightSkillsList">
+                <!-- Injected dynamically -->
+              </div>
+            </div>
+            <div class="spotlight-search-summary">
+              <span class="footer-label">Search Config:</span>
+              <span class="badge badge-dim" id="spotlightQueriesCount">14 Queries</span>
+              <span class="badge badge-dim" id="spotlightLocationsCount">20 Regions</span>
             </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- TAB 4: Search Configuration -->
-    <section class="tab-pane" id="tab-search-config">
-      <div class="config-grid">
-        <div class="config-card">
-          <h3>Target Search Queries (from searches.yaml)</h3>
-          <ul class="query-list" id="configQueryList">
-            <li>Loading search queries...</li>
-          </ul>
+      <!-- Profiles Grid Section -->
+      <section class="profiles-grid-section">
+        <div class="section-title-bar">
+          <div>
+            <h3>All Candidate Profiles</h3>
+            <p class="section-sub">Choose a profile below to activate it, or create a brand new profile for any role.</p>
+          </div>
+          <button class="btn btn-primary" id="btnCreateNewProfileGrid">
+            + Create New Profile
+          </button>
         </div>
-        <div class="config-card">
-          <h3>Target Search Regions</h3>
-          <ul class="location-list" id="configLocationList">
-            <li>Loading locations...</li>
-          </ul>
+
+        <div class="profiles-cards-grid" id="profilesCardsGrid">
+          <!-- Dynamically filled with profile cards -->
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading candidate profiles...</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 2: INTERMEDIATE PIPELINE (Execution & Automation Control) -->
+    <!-- ========================================================================= -->
+    <main class="app-view" id="view-pipeline">
+      <!-- Breadcrumbs & Quick Return -->
+      <nav class="pipeline-breadcrumb">
+        <a href="#home" class="breadcrumb-link" id="linkPipelineHome">&larr; Back to Profiles Hub</a>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current" id="pipelineBreadcrumbProfile">Profile: Golang Backend</span>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-stage">Automation Pipeline</span>
+      </nav>
+
+      <!-- Pipeline Action Header Banner -->
+      <section class="pipeline-hero-banner">
+        <div class="pipeline-hero-info">
+          <div class="hero-candidate-badge">
+            <span class="candidate-dot"></span>
+            Targeting: <strong id="pipelineTargetCandidate">Sangamdeep Kashyap</strong> &mdash; <span id="pipelineTargetRole">Golang Backend Developer</span>
+          </div>
+          <h2>Automation Pipeline Stage Control</h2>
+          <p>
+            Trigger intelligent multi-stage execution. Click <strong>Play</strong> to search and enrich jobs across portals, score against profile criteria, and tailor ATS resumes.
+          </p>
+        </div>
+
+        <!-- Prominent Open Monitor Gateway -->
+        <div class="pipeline-gateway-side">
+          <div class="gateway-card">
+            <div class="gateway-text">
+              <span class="gateway-title">Monitor Dashboard</span>
+              <span class="gateway-sub" id="gatewayJobCountText">140 Jobs Discovered</span>
+            </div>
+            <button class="btn btn-primary btn-lg" id="btnPipelineOpenMonitor">
+              Open Monitor Dashboard &rarr;
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Visual 5-Stage Interactive Pipeline Tracker -->
+      <section class="pipeline-flow-section">
+        <div class="pipeline-flow-container">
+          <!-- Stage 1: Discovery -->
+          <div class="pipeline-node" id="node-discover" data-stage="discover">
+            <div class="node-indicator">
+              <span class="node-icon">🔍</span>
+              <div class="node-status-ring"></div>
+            </div>
+            <div class="node-content">
+              <span class="node-step">Stage 01</span>
+              <h4>Job Discovery</h4>
+              <p class="node-desc">Multi-portal scraping across LinkedIn, Indeed, Glassdoor & ZipRecruiter.</p>
+              <div class="node-stats">
+                <span class="node-badge" id="nodeDiscoverCount">0 Jobs</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-node-play" data-action="search" title="Run Discovery Only">
+              ▶ Run
+            </button>
+          </div>
+
+          <div class="pipeline-connector">
+            <div class="connector-line"></div>
+          </div>
+
+          <!-- Stage 2: Detail Enrichment -->
+          <div class="pipeline-node" id="node-enrich" data-stage="enrich">
+            <div class="node-indicator">
+              <span class="node-icon">📑</span>
+              <div class="node-status-ring"></div>
+            </div>
+            <div class="node-content">
+              <span class="node-step">Stage 02</span>
+              <h4>Detail Enrichment</h4>
+              <p class="node-desc">Stealth scrapers extract full requirements & job specifications.</p>
+              <div class="node-stats">
+                <span class="node-badge" id="nodeEnrichCount">0 Enriched</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-node-play" data-action="search" title="Run Enrichment">
+              ▶ Run
+            </button>
+          </div>
+
+          <div class="pipeline-connector">
+            <div class="connector-line"></div>
+          </div>
+
+          <!-- Stage 3: LLM Fit Scoring -->
+          <div class="pipeline-node" id="node-score" data-stage="score">
+            <div class="node-indicator">
+              <span class="node-icon">🧠</span>
+              <div class="node-status-ring"></div>
+            </div>
+            <div class="node-content">
+              <span class="node-step">Stage 03</span>
+              <h4>AI Match Scoring</h4>
+              <p class="node-desc">Evaluates candidate skills & compensation against requirements (0-10).</p>
+              <div class="node-stats">
+                <span class="node-badge" id="nodeScoreCount">0 Scored</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-node-play" data-action="score" title="Run LLM Scoring">
+              ▶ Run
+            </button>
+          </div>
+
+          <div class="pipeline-connector">
+            <div class="connector-line"></div>
+          </div>
+
+          <!-- Stage 4: Resume Tailoring -->
+          <div class="pipeline-node" id="node-tailor" data-stage="tailor">
+            <div class="node-indicator">
+              <span class="node-icon">📝</span>
+              <div class="node-status-ring"></div>
+            </div>
+            <div class="node-content">
+              <span class="node-step">Stage 04</span>
+              <h4>Resume Tailoring</h4>
+              <p class="node-desc">Generates ATS-optimized resumes and targeted cover letters.</p>
+              <div class="node-stats">
+                <span class="node-badge" id="nodeTailorCount">0 Tailored</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-node-play" data-action="tailor" title="Run Tailoring">
+              ▶ Run
+            </button>
+          </div>
+
+          <div class="pipeline-connector">
+            <div class="connector-line"></div>
+          </div>
+
+          <!-- Stage 5: Autonomous Apply -->
+          <div class="pipeline-node" id="node-apply" data-stage="apply">
+            <div class="node-indicator">
+              <span class="node-icon">🚀</span>
+              <div class="node-status-ring"></div>
+            </div>
+            <div class="node-content">
+              <span class="node-step">Stage 05</span>
+              <h4>Browser Apply</h4>
+              <p class="node-desc">Headless browser automation fills forms and submits applications.</p>
+              <div class="node-stats">
+                <span class="node-badge" id="nodeApplyCount">0 Applied</span>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-ghost btn-node-play" data-action="apply" title="Run Auto-Apply">
+              ▶ Run
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Execution Action & Settings Control Bar -->
+      <section class="pipeline-controls-panel">
+        <div class="panel-left">
+          <button class="btn btn-primary btn-xl btn-pulse" id="btnPlayJobSearch">
+            <span class="play-icon">▶</span>
+            <div class="btn-text-group">
+              <span class="btn-main-text">Run Job Search</span>
+              <span class="btn-sub-text">Discover & Enrich Openings</span>
+            </div>
+          </button>
+
+          <button class="btn btn-secondary btn-xl" id="btnPlayFullPipeline">
+            <span class="play-icon">⚡</span>
+            <div class="btn-text-group">
+              <span class="btn-main-text">Run Full Pipeline</span>
+              <span class="btn-sub-text">Search &rarr; Score &rarr; Tailor</span>
+            </div>
+          </button>
+
+          <button class="btn btn-danger btn-xl btn-hidden" id="btnStopExecution">
+            <span class="play-icon">⏹</span>
+            <div class="btn-text-group">
+              <span class="btn-main-text">Stop Execution</span>
+              <span class="btn-sub-text">Terminate Background Job</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="panel-right">
+          <!-- Execution Parameters -->
+          <div class="param-group">
+            <label for="paramWorkersSelect">Workers:</label>
+            <div class="select-wrapper mini">
+              <select id="paramWorkersSelect">
+                <option value="1">1 Worker</option>
+                <option value="2" selected>2 Workers</option>
+                <option value="4">4 Workers</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="param-group">
+            <label for="paramMinScoreSelect">Min Fit Score:</label>
+            <div class="select-wrapper mini">
+              <select id="paramMinScoreSelect">
+                <option value="5">Score 5+</option>
+                <option value="7" selected>Score 7+ (Recommended)</option>
+                <option value="8">Score 8+ (Strict)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="param-group param-checkbox">
+            <label>
+              <input type="checkbox" id="paramDryRunCheckbox">
+              <span>Dry Run (Preview Only)</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Execution Telemetry & Terminal -->
+      <section class="pipeline-telemetry-row">
+        <!-- Telemetry Status Card -->
+        <div class="telemetry-card status-card">
+          <div class="card-head">
+            <h3>Engine Execution State</h3>
+            <span class="badge" id="telemetryStatusBadge">IDLE</span>
+          </div>
+          <div class="telemetry-body">
+            <div class="telemetry-metric-item">
+              <span class="metric-title">Active Stage:</span>
+              <span class="metric-data highlight" id="telemetryStage">Ready to Run</span>
+            </div>
+            <div class="telemetry-metric-item">
+              <span class="metric-title">Process ID (PID):</span>
+              <span class="metric-data mono" id="telemetryPid">--</span>
+            </div>
+            <div class="telemetry-metric-item">
+              <span class="metric-title">Elapsed Time:</span>
+              <span class="metric-data mono" id="telemetryElapsed">00:00:00</span>
+            </div>
+            <div class="telemetry-metric-item">
+              <span class="metric-title">Current Command:</span>
+              <span class="metric-data mono text-dim text-truncate" id="telemetryCommand">--</span>
+            </div>
+            <div class="telemetry-metric-item">
+              <span class="metric-title">Database Storage:</span>
+              <span class="metric-data mono" id="telemetryDbSize">0 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Terminal Output Window -->
+        <div class="telemetry-card terminal-card">
+          <div class="terminal-head">
+            <div class="terminal-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="terminal-title">Real-Time Engine Stream (pipeline_run.log)</span>
+            <div class="terminal-actions">
+              <label class="terminal-autoscroll">
+                <input type="checkbox" id="terminalAutoScroll" checked> Auto-scroll
+              </label>
+              <button class="btn btn-sm btn-ghost" id="btnClearTerminal">Clear</button>
+            </div>
+          </div>
+          <div class="terminal-body" id="pipelineTerminalBody">
+            <div class="log-line system">[SYSTEM] ApplyPilot Pipeline Terminal initialized. Ready for execution.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 3: MONITOR & DASHBOARD (Detailed Jobs, Resumes, and Error Center) -->
+    <!-- ========================================================================= -->
+    <main class="app-view" id="view-monitor">
+      <!-- Monitor Header with Breadcrumbs -->
+      <div class="monitor-nav-header">
+        <nav class="pipeline-breadcrumb">
+          <a href="#home" class="breadcrumb-link" id="linkMonitorHome">&larr; Profiles Hub</a>
+          <span class="breadcrumb-sep">/</span>
+          <a href="#pipeline" class="breadcrumb-link" id="linkMonitorPipeline">Pipeline Control</a>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-stage">Live Monitor Dashboard</span>
+        </nav>
+
+        <div class="monitor-nav-actions">
+          <button class="btn btn-secondary btn-sm" id="btnMonitorBackToPipeline">
+            &larr; Return to Pipeline
+          </button>
         </div>
       </div>
-    </section>
+
+      <!-- Dedicated Application Errors Alert Banner (Shown when errors exist) -->
+      <section class="error-alert-banner btn-hidden" id="monitorErrorBanner">
+        <div class="error-alert-content">
+          <div class="error-alert-icon">⚠️</div>
+          <div class="error-alert-text">
+            <h4><span id="bannerErrorCount">0</span> Application Submission Issues Detected</h4>
+            <p>One or more job applications encountered barriers (e.g., CAPTCHA challenge, login wall, external redirect). Review the failure diagnostics below or open original job posts to apply manually.</p>
+          </div>
+        </div>
+        <button class="btn btn-danger btn-sm" id="btnBannerViewErrors">
+          Inspect Error Diagnostics &rarr;
+        </button>
+      </section>
+
+      <!-- Key Metrics KPI Grid -->
+      <section class="kpi-grid">
+        <div class="kpi-card" data-stage="discovered">
+          <div class="kpi-icon icon-cyan">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Discovered Jobs</span>
+            <div class="kpi-value" id="kpiDiscovered">0</div>
+            <span class="kpi-sub" id="kpiEnrichedSub">0 enriched</span>
+          </div>
+        </div>
+
+        <div class="kpi-card" data-stage="scored">
+          <div class="kpi-icon icon-violet">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Scored by LLM</span>
+            <div class="kpi-value" id="kpiScored">0</div>
+            <span class="kpi-sub" id="kpiAvgScoreSub">Avg Score: --</span>
+          </div>
+        </div>
+
+        <div class="kpi-card highlight-card" data-stage="tailored">
+          <div class="kpi-icon icon-amber">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Tailored Resumes</span>
+            <div class="kpi-value" id="kpiTailored">0</div>
+            <span class="kpi-sub" id="kpiPendingTailorSub">0 pending high-fit</span>
+          </div>
+        </div>
+
+        <div class="kpi-card ready-card" data-stage="ready">
+          <div class="kpi-icon icon-blue">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Ready to Apply</span>
+            <div class="kpi-value" id="kpiReady">0</div>
+            <span class="kpi-sub">Score &ge; 7 & URL valid</span>
+          </div>
+        </div>
+
+        <div class="kpi-card success-card" data-stage="applied">
+          <div class="kpi-icon icon-emerald">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Jobs Applied</span>
+            <div class="kpi-value" id="kpiApplied">0</div>
+            <span class="kpi-sub text-emerald" id="kpiAppliedSub">0 submissions</span>
+          </div>
+        </div>
+
+        <!-- KPI: Explicit Application Errors -->
+        <div class="kpi-card error-card" id="kpiErrorCard" data-stage="error">
+          <div class="kpi-icon icon-rose">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div class="kpi-content">
+            <span class="kpi-label">Application Errors</span>
+            <div class="kpi-value text-rose" id="kpiErrors">0</div>
+            <span class="kpi-sub text-rose" id="kpiErrorsSub">0 issues</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Analytics Row -->
+      <section class="analytics-row">
+        <!-- Score Distribution Bar Chart -->
+        <div class="analytics-card score-dist-card">
+          <div class="card-head">
+            <h3>Fit Score Distribution (0 - 10)</h3>
+            <span class="hint">Click bar to filter jobs table</span>
+          </div>
+          <div class="score-bars-container" id="scoreBarsContainer">
+            <div class="loading-placeholder">Loading fit scores...</div>
+          </div>
+        </div>
+
+        <!-- Portals Distribution -->
+        <div class="analytics-card sources-card">
+          <div class="card-head">
+            <h3>Discovered by Job Portal</h3>
+            <span class="hint" id="totalSitesCount">-- sites</span>
+          </div>
+          <div class="sources-list" id="sourcesList">
+            <div class="loading-placeholder">Loading job portals...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Monitor Navigation Tabs -->
+      <nav class="main-tabs">
+        <button class="tab-btn active" data-tab="tab-applied">
+          <span class="tab-icon">🚀</span>
+          Applied Jobs & Tailored Resumes
+          <span class="badge" id="tabAppliedCount">0</span>
+        </button>
+        <button class="tab-btn tab-error-btn" data-tab="tab-errors" id="tabBtnErrors">
+          <span class="tab-icon">⚠️</span>
+          Application Issues & Errors
+          <span class="badge badge-rose" id="tabErrorsCount">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-all-jobs">
+          <span class="tab-icon">📋</span>
+          All Discovered Jobs
+          <span class="badge" id="tabAllJobsCount">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-live-feed">
+          <span class="tab-icon">⚡</span>
+          Live Feed & Telemetry
+        </button>
+        <button class="tab-btn" data-tab="tab-search-config">
+          <span class="tab-icon">🎯</span>
+          Search Tiers & Config
+        </button>
+      </nav>
+
+      <!-- TAB 1: Applied Jobs & Tailored Resumes -->
+      <section class="tab-pane active" id="tab-applied">
+        <div class="section-toolbar">
+          <div class="search-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input type="text" id="appliedSearchInput" placeholder="Filter applied/tailored jobs by title, company...">
+          </div>
+          <div class="filter-group">
+            <button class="btn btn-sm btn-outline active" data-filter="all">All Available</button>
+            <button class="btn btn-sm btn-outline" data-filter="applied_only">Applied Only</button>
+            <button class="btn btn-sm btn-outline" data-filter="tailored_only">Tailored Resumes</button>
+          </div>
+        </div>
+
+        <div class="applied-jobs-grid" id="appliedJobsGrid">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Scanning database for applied and tailored jobs...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: Dedicated Application Errors Diagnostic Center -->
+      <section class="tab-pane" id="tab-errors">
+        <div class="error-center-intro">
+          <div>
+            <h3>Job Application Issues & Error Diagnostics</h3>
+            <p class="section-sub">Jobs where autonomous browser application encountered an obstacle. You can review the exact reason, retry the application, or apply directly on the job site.</p>
+          </div>
+        </div>
+
+        <!-- Error Summary Cards -->
+        <div class="error-breakdown-row" id="errorBreakdownRow">
+          <!-- Filled dynamically with categorized error summaries -->
+        </div>
+
+        <!-- Table of Failed Jobs -->
+        <div class="jobs-table-wrapper">
+          <table class="jobs-table error-table">
+            <thead>
+              <tr>
+                <th style="width: 70px;">Score</th>
+                <th>Job Title & Company</th>
+                <th>Portal</th>
+                <th>Failure Reason / Diagnostic</th>
+                <th style="width: 90px;">Attempts</th>
+                <th style="text-align: right;">Manual Action</th>
+              </tr>
+            </thead>
+            <tbody id="errorsTableBody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 3: All Discovered Jobs Table -->
+      <section class="tab-pane" id="tab-all-jobs">
+        <div class="section-toolbar">
+          <div class="search-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input type="text" id="jobsSearchInput" placeholder="Search title, keywords, company, location...">
+          </div>
+
+          <div class="filters-row">
+            <select id="filterStageSelect" class="form-select">
+              <option value="all">All Stages</option>
+              <option value="errors">⚠️ Application Errors</option>
+              <option value="applied">Applied</option>
+              <option value="tailored">Tailored Resume Ready</option>
+              <option value="ready">Ready to Apply (7+)</option>
+              <option value="high">High Fit (Score &ge; 7)</option>
+              <option value="scored">All Scored (&ge; 5)</option>
+            </select>
+
+            <select id="filterSiteSelect" class="form-select">
+              <option value="all">All Sites / Sources</option>
+            </select>
+
+            <select id="filterMinScoreSelect" class="form-select">
+              <option value="">Any Fit Score</option>
+              <option value="8">Score &ge; 8 (Exceptional)</option>
+              <option value="7">Score &ge; 7 (Strong Match)</option>
+              <option value="5">Score &ge; 5 (Relevant)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="jobs-table-wrapper">
+          <table class="jobs-table">
+            <thead>
+              <tr>
+                <th style="width: 70px;">Score</th>
+                <th>Job Title & Company</th>
+                <th>Source</th>
+                <th>Location</th>
+                <th>Tailored Resume</th>
+                <th>Status</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="jobsTableBody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 4: Live Feed & Engine Activity -->
+      <section class="tab-pane" id="tab-live-feed">
+        <div class="feed-container">
+          <div class="feed-left">
+            <div class="feed-card">
+              <h3>Active Background Processes</h3>
+              <div id="runningProcessList" class="process-list">
+                <p class="empty-text">No active processes detected.</p>
+              </div>
+            </div>
+
+            <div class="feed-card">
+              <h3>Recent Tailored Resume Files</h3>
+              <div id="recentTailoredList" class="recent-files-list">
+                <p class="empty-text">Scanning directory...</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="feed-right">
+            <div class="feed-card full-height">
+              <div class="terminal-head">
+                <div class="terminal-dots">
+                  <span></span><span></span><span></span>
+                </div>
+                <span class="terminal-title">Real-Time Event Stream</span>
+                <button class="btn btn-sm btn-ghost" id="btnClearStream">Clear</button>
+              </div>
+              <div class="terminal-body" id="eventStreamLog">
+                <div class="log-line system">[SYSTEM] ApplyPilot live telemetry stream attached.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: Search Configuration -->
+      <section class="tab-pane" id="tab-search-config">
+        <div class="config-grid">
+          <div class="config-card">
+            <h3>Target Search Queries (from searches.yaml)</h3>
+            <ul class="query-list" id="configQueryList">
+              <li>Loading search queries...</li>
+            </ul>
+          </div>
+          <div class="config-card">
+            <h3>Target Search Regions</h3>
+            <ul class="location-list" id="configLocationList">
+              <li>Loading locations...</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
-  <!-- Modal: Resume Viewer & Exporter -->
+  <!-- ========================================================================= -->
+  <!-- MODAL: PROFILE CREATOR & EDITOR (Create & Edit) -->
+  <!-- ========================================================================= -->
+  <div class="modal-backdrop" id="profileModal">
+    <div class="modal-content modal-xl">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="badge badge-accent" id="profileModalBadge">Profile Editor</span>
+          <h2 id="profileModalTitle">Create Candidate Profile</h2>
+          <span class="modal-subtitle">Configure identity, skills, searches, and base resume for automated tailoring.</span>
+        </div>
+        <button class="modal-close" id="btnCloseProfileModal">&times;</button>
+      </div>
+
+      <form id="profileForm" class="modal-body-scroll">
+        <div class="form-sections-container">
+          <!-- Section 1: Identification & Personal Info -->
+          <div class="form-section">
+            <div class="section-badge">01</div>
+            <div class="section-fields">
+              <h4 class="form-section-title">Candidate Identification & Contact</h4>
+              <div class="form-grid-3">
+                <div class="form-group">
+                  <label for="formProfileId">Profile ID (Slug) <span class="required">*</span></label>
+                  <input type="text" id="formProfileId" placeholder="e.g. wife_product_mgr, friend_devops" required>
+                  <span class="field-hint">Alphanumeric, underscores, hyphens only.</span>
+                </div>
+                <div class="form-group">
+                  <label for="formFullName">Legal Full Name <span class="required">*</span></label>
+                  <input type="text" id="formFullName" placeholder="e.g. Sarah Jenkins" required>
+                </div>
+                <div class="form-group">
+                  <label for="formPreferredName">Preferred Name</label>
+                  <input type="text" id="formPreferredName" placeholder="e.g. Sarah">
+                </div>
+              </div>
+
+              <div class="form-grid-3">
+                <div class="form-group">
+                  <label for="formEmail">Email Address <span class="required">*</span></label>
+                  <input type="email" id="formEmail" placeholder="candidate@example.com" required>
+                </div>
+                <div class="form-group">
+                  <label for="formPhone">Phone Number</label>
+                  <input type="text" id="formPhone" placeholder="+1-555-0192">
+                </div>
+                <div class="form-group">
+                  <label for="formLocation">City & Country</label>
+                  <input type="text" id="formLocation" placeholder="e.g. Berlin, Germany">
+                </div>
+              </div>
+
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="formLinkedin">LinkedIn Profile URL</label>
+                  <input type="url" id="formLinkedin" placeholder="https://linkedin.com/in/username">
+                </div>
+                <div class="form-group">
+                  <label for="formGithub">GitHub / Portfolio URL</label>
+                  <input type="url" id="formGithub" placeholder="https://github.com/username">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 2: Career & Target Role -->
+          <div class="form-section">
+            <div class="section-badge">02</div>
+            <div class="section-fields">
+              <h4 class="form-section-title">Target Role & Career Level</h4>
+              <div class="form-grid-3">
+                <div class="form-group">
+                  <label for="formTargetRole">Target Job Title <span class="required">*</span></label>
+                  <input type="text" id="formTargetRole" placeholder="e.g. Senior Golang Engineer, Product Designer" required>
+                </div>
+                <div class="form-group">
+                  <label for="formYearsExp">Years of Experience</label>
+                  <input type="text" id="formYearsExp" placeholder="e.g. 5">
+                </div>
+                <div class="form-group">
+                  <label for="formEducation">Education Level</label>
+                  <input type="text" id="formEducation" placeholder="e.g. Bachelor's Degree">
+                </div>
+              </div>
+
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="formCurrentTitle">Current / Recent Title</label>
+                  <input type="text" id="formCurrentTitle" placeholder="e.g. Lead Developer">
+                </div>
+                <div class="form-group">
+                  <label for="formCurrentCompany">Current / Recent Company</label>
+                  <input type="text" id="formCurrentCompany" placeholder="e.g. Acme Corp">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: Skills Boundary -->
+          <div class="form-section">
+            <div class="section-badge">03</div>
+            <div class="section-fields">
+              <h4 class="form-section-title">Skills & Tech Stack (Comma-separated)</h4>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="formSkillsLanguages">Core Languages & Technologies</label>
+                  <input type="text" id="formSkillsLanguages" placeholder="e.g. Go, Python, TypeScript, SQL">
+                </div>
+                <div class="form-group">
+                  <label for="formSkillsFrameworks">Frameworks & Libraries</label>
+                  <input type="text" id="formSkillsFrameworks" placeholder="e.g. FastAPI, Gin, React, gRPC">
+                </div>
+              </div>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="formSkillsDevops">Cloud, DevOps & Tools</label>
+                  <input type="text" id="formSkillsDevops" placeholder="e.g. Docker, Kubernetes, AWS, Kafka, Redis">
+                </div>
+                <div class="form-group">
+                  <label for="formSkillsDatabases">Databases & Data</label>
+                  <input type="text" id="formSkillsDatabases" placeholder="e.g. PostgreSQL, Redis, MongoDB">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4: Target Searches & Locations -->
+          <div class="form-section">
+            <div class="section-badge">04</div>
+            <div class="section-fields">
+              <h4 class="form-section-title">Target Search Queries & Locations</h4>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="formSearchQueries">Job Search Queries (One per line)</label>
+                  <textarea id="formSearchQueries" rows="4" placeholder="golang backend engineer&#10;senior distributed systems engineer&#10;go developer"></textarea>
+                  <span class="field-hint">ApplyPilot scrapes jobs matching each line.</span>
+                </div>
+                <div class="form-group">
+                  <label for="formSearchLocations">Target Locations (One per line)</label>
+                  <textarea id="formSearchLocations" rows="4" placeholder="Berlin, Germany&#10;Remote, Germany&#10;Zurich, Switzerland&#10;United States"></textarea>
+                  <span class="field-hint">Locations searched across boards.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 5: Base Resume Text -->
+          <div class="form-section">
+            <div class="section-badge">05</div>
+            <div class="section-fields">
+              <h4 class="form-section-title">Base Resume Text (Source for AI Tailoring)</h4>
+              <div class="form-group">
+                <label for="formResumeText">Paste Plaintext Resume <span class="required">*</span></label>
+                <textarea id="formResumeText" rows="7" placeholder="JANE DOE&#10;Senior Software Engineer&#10;Email: jane@example.com | Phone: 555-1234&#10;&#10;SUMMARY&#10;Experienced engineer with 5+ years building distributed backends...&#10;&#10;EXPERIENCE&#10;...&#10;&#10;SKILLS&#10;..." required></textarea>
+                <span class="field-hint">The LLM reads this base text and adapts it for each scored job description.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelProfileModal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-lg" id="btnSaveProfile">
+            Save Candidate Profile
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: DELETE CONFIRMATION -->
+  <!-- ========================================================================= -->
+  <div class="modal-backdrop" id="deleteModal">
+    <div class="modal-content modal-sm">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="badge badge-rose">Confirm Deletion</span>
+          <h2>Delete Profile?</h2>
+        </div>
+        <button class="modal-close" id="btnCloseDeleteModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Are you sure you want to permanently delete profile <strong id="deleteProfileTargetName">--</strong>?</p>
+        <p class="text-rose text-sm" style="margin-top: 10px;">
+          This will permanently remove its configuration files, search queries, tailored resumes, and collected jobs database.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelDelete">Cancel</button>
+        <button class="btn btn-danger" id="btnConfirmDelete">Delete Permanently</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: RESUME VIEWER & EXPORTER -->
+  <!-- ========================================================================= -->
   <div class="modal-backdrop" id="resumeModal">
     <div class="modal-content modal-lg">
       <div class="modal-header">
@@ -383,23 +1032,21 @@
 
       <div class="modal-body">
         <div class="subtab-content active" id="subtab-formatted">
-          <div class="resume-preview-sheet" id="resumeFormattedContent">
-            <!-- Formatted Resume injected here -->
-          </div>
+          <div class="resume-preview-sheet" id="resumeFormattedContent"></div>
         </div>
         <div class="subtab-content" id="subtab-raw">
           <pre class="raw-code" id="resumeRawContent"></pre>
         </div>
         <div class="subtab-content" id="subtab-report">
-          <div class="report-box" id="resumeReportContent">
-            <!-- Report content -->
-          </div>
+          <div class="report-box" id="resumeReportContent"></div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Modal: Job Details & LLM Score Reasoning -->
+  <!-- ========================================================================= -->
+  <!-- MODAL: JOB DETAILS & LLM SCORE REASONING -->
+  <!-- ========================================================================= -->
   <div class="modal-backdrop" id="jobModal">
     <div class="modal-content">
       <div class="modal-header">
@@ -413,6 +1060,15 @@
         <button class="modal-close" id="btnCloseJobModal">&times;</button>
       </div>
       <div class="modal-body job-detail-body">
+        <!-- Error diagnostic banner if job has apply_error -->
+        <div class="job-error-box btn-hidden" id="modalJobErrorBox">
+          <div class="error-box-head">
+            <span>⚠️ Application Issue:</span>
+            <span id="modalJobErrorAttempts">1 attempt</span>
+          </div>
+          <p id="modalJobErrorMsg">Error description</p>
+        </div>
+
         <div class="job-meta-grid">
           <div class="job-meta-item">
             <span class="meta-label">Source Board:</span>
@@ -451,6 +1107,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
 
   <script src="app.js"></script>
 </body>
