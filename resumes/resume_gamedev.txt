@@ -1,0 +1,91 @@
+Sangamdeep Kashyap
+Bengaluru, India | +91-9501195532 | sangamkash@gmail.com
+LinkedIn: https://www.linkedin.com/in/sangamdeepkashyap/ | GitHub: https://github.com/sangamkash
+Portfolio: https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html
+
+SUMMARY
+Lead and Senior Game Developer with 9 years of hands-on experience designing and shipping high-performance mobile, PC, and multiplayer titles using Unity, C#, C++, and Unreal Engine. Deep specialization in multiplayer networking architectures (Photon PUN, Photon Quantum, Nakama), real-time physics engines, game optimization, and core client SDKs. Proven team leadership background managing OKRs, sprint delivery as Scrum Master, and coordinating QA release pipelines for games with over 5 million downloads.
+
+TECHNICAL SKILLS
+- Game Engines: Unity (Unity 3D), Unreal Engine
+- Programming Languages: C#, C++, Go, ShaderLab, HLSL
+- Multiplayer & Networking: MultiPlayer architecture, Photon PUN, Photon Quantum, Nakama, WebSockets, Client-Server Sync
+- Game Mechanics & Physics: Aircraft physics, Shooting mechanics, Ship movement AI, Fishing mechanics, Map systems, 8-ball pool physics
+- Performance Optimization: Game optimization, FPS improvement, Memory profiling, Draw call batching, Load time improvement, Garbage Collection profiling
+- Software Architecture: Core SDK development, Design patterns, Analytics architecture, UI frameworks, 3D object integration
+- Leadership & Methodology: Project planning, Setting OKR2, SCRUM master, QA delivery coordination, Technical Team Leadership
+- Tools & Profiling: Git, Unity Profiler, Visual Studio, RenderDoc, Jira
+
+EXPERIENCE
+
+BattleBucks
+Team Lead | 04/2024 - 03/2025
+- Led technical team roadmap, OKR planning, and sprint execution as Scrum Master for esports gaming platform.
+- Architected the core multiplayer tournament SDK and real-time state synchronization framework.
+- Managed QA delivery coordination, ensuring zero-defect deployments across major version releases.
+- Optimized client memory footprint and data caching to guarantee steady 60 FPS on mid-tier mobile hardware.
+
+Innoscripta
+Backend Engineer | 04/2024 - 03/2025
+- Contributed to project planning, system design, and database schema architecture for digital services.
+- Integrated AI services and automated verification modules into backend workflows.
+- Developed high-performance Go microservices delivering sub-second response times.
+
+Altworld
+Senior Software Engineer | 10/2023 - 03/2024
+- Created an extensive modular Map system supporting dynamic zone loading and spatial partitioning.
+- Implemented core interactive fishing mechanics, handling player inputs, physics feedback, and rewards.
+- Optimized terrain rendering and asset streaming, eliminating frame stutter during rapid player navigation.
+
+Hike Private Limited
+Senior Software Engineer | 01/2022 - 10/2023
+- Led client engineering for multiplayer Snake & Ladder featured prominently within the Rush app ecosystem.
+- Designed and implemented telemetry, benchmarking, and automated diagnostic tools for continuous performance tracking.
+- Reduced overall application load times by 40% through asset bundle restructuring and script execution profiling.
+
+99Games Private Limited
+Senior Software Engineer | 11/2020 - 12/2021
+- Led the implementation and release of the Food Land core feature in Star Chef 2 (Google Play Store).
+- Modeled, optimized, and integrated interactive 3D assets into runtime environments.
+- Elevated average frame rates from 45 FPS to a consistent 60 FPS across both iOS and Android target builds.
+
+JuegoStudio Private Limited
+Senior Software Engineer | 04/2018 - 11/2020
+- Built full-stack gameplay systems across AR, VR, and cross-platform multiplayer titles.
+- Modeled realistic rigid-body physics, ball collisions, and spin calculations for 8-ball pool mechanics.
+- Overhauled MMORPG memory management and network packet serialization to reduce mobile bandwidth consumption.
+- Developed an extensible, reusable UI architecture deployed across several commercial studio titles.
+
+Teapot Games
+Software Engineer | 01/2017 - 04/2018
+- Engineered flight aerodynamic models, weapon trajectory mechanics, and networked multiplayer sync using Photon PUN for War Dogs (5M+ downloads).
+- Implemented ship movement AI algorithms, buoyancy models, and visual particle effects for Enemy Waters.
+- Created intuitive user interface components and HUD elements optimized for varied mobile screen aspect ratios.
+
+Microsoft
+Student Partner | 01/2016 - 01/2017
+- Developed and released applications for the Windows Phone platform adhering to modern UI conventions.
+- Led technical workshops on mobile application development and software architecture patterns.
+
+PROJECTS
+
+War Dogs: Air Combat | Teapot Games
+- WW2 air combat dogfight simulator with over 5 million downloads across Android and iOS.
+- Engineered 6-DOF flight physics, weapon ballistics, and real-time multiplayer dogfight synchronization using Photon PUN.
+
+Enemy Waters: Naval Combat Battles | Teapot Games
+- Submarine and warship tactical combat game with complex underwater buoyancy physics and surface battle mechanics.
+- Developed AI state machines governing enemy warship search-and-destroy patrols and torpedo firing behaviors.
+
+Star Chef 2 | 99Games Private Limited
+- Leading culinary simulation game with millions of installs on the Google Play Store.
+- Headed Food Land expansion delivery, asset bundle optimization, and 3D restaurant layout rendering.
+
+Rush App (Snake & Ladder) | Hike Private Limited
+- Real-money casual gaming platform with competitive real-time multiplayer.
+- Built game board movement logic, dice roll physics, and telemetry systems reducing load times by 40%.
+
+EDUCATION
+
+Lovely Professional University
+Bachelor of Technology in Computer Science and Engineering | 2012 - 2016

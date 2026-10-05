@@ -1,0 +1,141 @@
+{
+  "personal": {
+    "full_name": "Sangamdeep Kashyap",
+    "preferred_name": "Sangam",
+    "email": "sangamkash@gmail.com",
+    "password": "",
+    "phone": "+91-9501195532",
+    "address": "",
+    "city": "Bengaluru",
+    "province_state": "Karnataka",
+    "country": "India",
+    "postal_code": "560001",
+    "linkedin_url": "https://www.linkedin.com/in/sangamdeepkashyap/",
+    "github_url": "https://github.com/sangamkash",
+    "portfolio_url": "https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html",
+    "website_url": "https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html"
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": "No",
+    "require_sponsorship": "Yes",
+    "work_permit_type": "Requires Visa Sponsorship for Germany, Switzerland, United States, and Nordic countries"
+  },
+  "availability": {
+    "earliest_start_date": "Immediately",
+    "available_for_full_time": "Yes",
+    "available_for_contract": "No"
+  },
+  "compensation": {
+    "salary_expectation": "95000",
+    "salary_currency": "EUR",
+    "salary_range_min": "90000",
+    "salary_range_max": "130000",
+    "currency_conversion_note": "Target 95,000 EUR in Germany/Nordics; equivalent 120,000-145,000 CHF in Switzerland or 140,000+ USD in United States"
+  },
+  "experience": {
+    "years_of_experience_total": "9",
+    "education_level": "Bachelor's Degree",
+    "current_job_title": "Team Lead / Senior Game Developer",
+    "current_company": "BattleBucks",
+    "target_role": "Unity Game Developer"
+  },
+  "skills_boundary": {
+    "languages": [
+      "C#",
+      "C++",
+      "Go",
+      "ShaderLab",
+      "HLSL"
+    ],
+    "game_engines": [
+      "Unity",
+      "Unity 3D",
+      "Unreal Engine"
+    ],
+    "multiplayer_and_networking": [
+      "MultiPlayer architecture",
+      "Photon PUN",
+      "Photon Quantum",
+      "Nakama",
+      "WebSockets",
+      "State synchronization",
+      "Lag compensation"
+    ],
+    "game_mechanics_and_physics": [
+      "Physics implementation",
+      "Aircraft physics",
+      "Shooting mechanics",
+      "Ship movement AI",
+      "Fishing game mechanism",
+      "Map system",
+      "8-ball pool physics"
+    ],
+    "optimization": [
+      "Game optimization",
+      "FPS improvement",
+      "Memory optimization",
+      "Network bandwidth optimization",
+      "Load time improvement",
+      "Draw call batching",
+      "Profiling"
+    ],
+    "architecture_and_practices": [
+      "Core SDK development",
+      "Design patterns",
+      "Analytics architecture",
+      "Benchmarking tools",
+      "Framework for UIs",
+      "3D objects integration"
+    ],
+    "leadership_and_management": [
+      "Project planning",
+      "Setting OKR2",
+      "SCRUM master",
+      "QA delivery coordination",
+      "TeamLead"
+    ],
+    "tools": [
+      "Git",
+      "Unity Profiler",
+      "Visual Studio",
+      "RenderDoc",
+      "Jira"
+    ]
+  },
+  "resume_facts": {
+    "preserved_companies": [
+      "BattleBucks",
+      "Innoscripta",
+      "Altworld",
+      "Hike Private Limited",
+      "99Games Private Limited",
+      "JuegoStudio Private Limited",
+      "Teapot Games",
+      "Microsoft"
+    ],
+    "preserved_projects": [
+      "War Dogs: Air Combat",
+      "Enemy Waters: Submarine and Warship Battles",
+      "BattleBucks Multiplayer SDK",
+      "Rush App (Snake & Ladder)",
+      "Star Chef 2",
+      "Altworld Virtual World",
+      "8 Ball Pool & MMORPG Optimization",
+      "Coin King"
+    ],
+    "preserved_school": "Lovely Professional University",
+    "real_metrics": [
+      "5M+ downloads across mobile platforms",
+      "Improved FPS and reduced game load time by 40%",
+      "Scaled real-time multiplayer syncing for high-concurrency players",
+      "Optimized MMORPG game memory and network bandwidth",
+      "Led cross-functional teams to deliver AAA-quality mobile features"
+    ]
+  },
+  "eeo_voluntary": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "veteran_status": "I am not a protected veteran",
+    "disability_status": "I do not wish to answer"
+  }
+}

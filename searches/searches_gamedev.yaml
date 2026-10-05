@@ -1,0 +1,146 @@
+# ApplyPilot Search Configuration - Game Development (Unity & Leadership)
+# Target regions: Germany, Switzerland, United States, and Nordic Countries (Sweden, Norway, Denmark, Finland)
+
+queries:
+  # Tier 1: Exact high-priority matches
+  - query: "senior unity game developer"
+    tier: 1
+  - query: "lead unity developer"
+    tier: 1
+  - query: "unity gameplay engineer"
+    tier: 1
+  - query: "senior game developer unity"
+    tier: 1
+  - query: "multiplayer game engineer unity"
+    tier: 1
+
+  # Tier 2: Leadership, SDK & Architecture
+  - query: "game engineering lead"
+    tier: 2
+  - query: "game client engineer unity"
+    tier: 2
+  - query: "unity c# software engineer"
+    tier: 2
+  - query: "lead game programmer"
+    tier: 2
+  - query: "game systems engineer"
+    tier: 2
+
+  # Tier 3: Wider net
+  - query: "senior game programmer"
+    tier: 3
+  - query: "gameplay programmer"
+    tier: 3
+  - query: "game developer"
+    tier: 3
+  - query: "software engineer games"
+    tier: 3
+
+# Target search locations
+locations:
+  # Germany
+  - location: "Berlin, Germany"
+    remote: false
+  - location: "Munich, Germany"
+    remote: false
+  - location: "Hamburg, Germany"
+    remote: false
+  - location: "Germany"
+    remote: false
+
+  # Switzerland
+  - location: "Zurich, Switzerland"
+    remote: false
+  - location: "Switzerland"
+    remote: false
+
+  # United States
+  - location: "San Francisco, CA"
+    remote: false
+  - location: "Los Angeles, CA"
+    remote: false
+  - location: "Seattle, WA"
+    remote: false
+  - location: "United States"
+    remote: false
+
+  # Nordic Countries (Major Game Dev hubs: Stockholm, Helsinki, Malmö, etc.)
+  - location: "Stockholm, Sweden"
+    remote: false
+  - location: "Sweden"
+    remote: false
+  - location: "Helsinki, Finland"
+    remote: false
+  - location: "Finland"
+    remote: false
+  - location: "Oslo, Norway"
+    remote: false
+  - location: "Norway"
+    remote: false
+  - location: "Copenhagen, Denmark"
+    remote: false
+  - location: "Denmark"
+    remote: false
+
+  # Remote
+  - location: "Remote"
+    remote: true
+
+# Location pattern filters
+location:
+  accept_patterns:
+    - "Germany"
+    - "Berlin"
+    - "Munich"
+    - "Hamburg"
+    - "Switzerland"
+    - "Zurich"
+    - "United States"
+    - "USA"
+    - "US"
+    - "California"
+    - "Sweden"
+    - "Stockholm"
+    - "Finland"
+    - "Helsinki"
+    - "Norway"
+    - "Oslo"
+    - "Denmark"
+    - "Copenhagen"
+    - "Nordic"
+    - "Europe"
+    - "Remote"
+    - "Worldwide"
+    - "Anywhere"
+  reject_patterns:
+    - "onsite only"
+    - "clearance required"
+    - "must be citizen"
+    - "no sponsorship"
+
+# Country for Indeed search
+country: "germany"
+
+# Boards to search
+boards:
+  - linkedin
+  - indeed
+  - glassdoor
+  - google
+
+# Search defaults
+defaults:
+  results_per_site: 50
+  hours_old: 72
+
+# Negative keywords in titles
+exclude_titles:
+  - "intern"
+  - "internship"
+  - "junior"
+  - "entry level"
+  - "unreal only"
+  - "3d artist"
+  - "concept artist"
+  - "animator"
+  - "sound designer"

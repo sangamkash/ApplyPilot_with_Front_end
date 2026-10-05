@@ -1,0 +1,135 @@
+{
+  "personal": {
+    "full_name": "Sangamdeep Kashyap",
+    "preferred_name": "Sangam",
+    "email": "sangamkash@gmail.com",
+    "password": "",
+    "phone": "+91-9501195532",
+    "address": "",
+    "city": "Bengaluru",
+    "province_state": "Karnataka",
+    "country": "India",
+    "postal_code": "560001",
+    "linkedin_url": "https://www.linkedin.com/in/sangamdeepkashyap/",
+    "github_url": "https://github.com/sangamkash",
+    "portfolio_url": "https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html",
+    "website_url": "https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html"
+  },
+  "work_authorization": {
+    "legally_authorized_to_work": "No",
+    "require_sponsorship": "Yes",
+    "work_permit_type": "Requires Visa Sponsorship for Germany, Switzerland, United States, and Nordic countries"
+  },
+  "availability": {
+    "earliest_start_date": "Immediately",
+    "available_for_full_time": "Yes",
+    "available_for_contract": "No"
+  },
+  "compensation": {
+    "salary_expectation": "95000",
+    "salary_currency": "EUR",
+    "salary_range_min": "90000",
+    "salary_range_max": "125000",
+    "currency_conversion_note": "Target 95,000 EUR in Germany/Nordics; equivalent 120,000-140,000 CHF in Switzerland or 140,000+ USD in United States"
+  },
+  "experience": {
+    "years_of_experience_total": "9",
+    "education_level": "Bachelor's Degree",
+    "current_job_title": "Backend Engineer (Golang & AI)",
+    "current_company": "Innoscripta",
+    "target_role": "Golang Backend Developer"
+  },
+  "skills_boundary": {
+    "languages": [
+      "Go",
+      "Golang",
+      "SQL",
+      "C++",
+      "C#",
+      "Python",
+      "Bash"
+    ],
+    "backend_frameworks": [
+      "Gin",
+      "Echo",
+      "Chi",
+      "gRPC",
+      "Protobuf",
+      "RESTful APIs"
+    ],
+    "messaging_and_queues": [
+      "Kafka",
+      "RabbitMQ",
+      "Redis Pub/Sub"
+    ],
+    "databases_and_caching": [
+      "PostgreSQL",
+      "MySQL",
+      "SQL",
+      "MongoDB",
+      "Redis"
+    ],
+    "ai_and_ml_integration": [
+      "AI integration",
+      "LLM APIs",
+      "Ollama",
+      "Prompt Engineering",
+      "Vector Embeddings",
+      "RAG"
+    ],
+    "architecture_and_practices": [
+      "System design",
+      "Microservices architecture",
+      "High throughput",
+      "Concurrency & Goroutines",
+      "Performance optimization",
+      "Project planning"
+    ],
+    "devops_and_cloud": [
+      "Docker",
+      "Kubernetes",
+      "CI/CD",
+      "Linux",
+      "Git"
+    ],
+    "observability": [
+      "Prometheus",
+      "Grafana",
+      "Benchmarking tools",
+      "Analytics architecture"
+    ]
+  },
+  "resume_facts": {
+    "preserved_companies": [
+      "Innoscripta",
+      "BattleBucks",
+      "Altworld",
+      "Hike Private Limited",
+      "99Games Private Limited",
+      "JuegoStudio Private Limited",
+      "Teapot Games",
+      "Microsoft"
+    ],
+    "preserved_projects": [
+      "Digital Signature App Microservices",
+      "AI Integration & Verification Workflow",
+      "BattleBucks Tournament & SDK Architecture",
+      "Rush Analytics & Benchmarking Architecture",
+      "War Dogs & Enemy Waters Systems"
+    ],
+    "preserved_school": "Lovely Professional University",
+    "real_metrics": [
+      "5M+ downloads across mobile platforms",
+      "Improved latency and reduced load times by 40%",
+      "Engineered microservices for signature workflows with sub-second execution",
+      "Maintained 60 FPS performance under peak concurrent user loads",
+      "Delivered real-time telemetry and benchmarking pipelines"
+    ]
+  },
+  "eeo_voluntary": {
+    "gender": "Decline to self-identify",
+    "race_ethnicity": "Decline to self-identify",
+    "veteran_status": "I am not a protected veteran",
+    "disability_status": "I do not wish to answer"
+  }
+}

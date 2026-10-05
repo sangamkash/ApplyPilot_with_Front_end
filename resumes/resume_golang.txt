@@ -1,0 +1,87 @@
+Sangamdeep Kashyap
+Bengaluru, India | +91-9501195532 | sangamkash@gmail.com
+LinkedIn: https://www.linkedin.com/in/sangamdeepkashyap/ | GitHub: https://github.com/sangamkash
+Portfolio: https://sangamkash.github.io/PortfolioData/GameDevProtfolioFinal.html
+
+SUMMARY
+Backend Software Engineer with 9 years of experience engineering high-concurrency microservices, distributed systems, and real-time backend infrastructure using Go (Golang), SQL, MongoDB, Redis, Kafka, and RabbitMQ. Proven background integrating AI capabilities and LLM workflows into production applications. Experienced in system design, distributed data pipelines, latency optimization, and microservice orchestration across multi-region deployments.
+
+TECHNICAL SKILLS
+- Programming Languages: Go (Golang), SQL, C++, C#, Python, Bash
+- Backend Frameworks & Protocols: Gin, Echo, Chi, gRPC, Protocol Buffers, RESTful APIs, WebSockets
+- Message Brokers & Streaming: Apache Kafka, RabbitMQ, Redis Pub/Sub, Event-Driven Architecture
+- Databases & Caching: PostgreSQL, MySQL, MongoDB, Redis, Database Indexing, Query Optimization
+- AI & LLM Integration: LLM APIs, Ollama, Prompt Engineering, Vector Search, Retrieval-Augmented Generation (RAG)
+- DevOps & Cloud: Docker, Kubernetes, CI/CD Pipelines, GitHub Actions, Linux
+- Monitoring & Telemetry: Prometheus, Grafana, Benchmarking Tools, Distributed Tracing
+
+EXPERIENCE
+
+Innoscripta
+Backend Engineer | 04/2024 - 03/2025
+- Architected and deployed Go-based microservices for digital signature applications, achieving sub-second request handling under concurrent traffic.
+- Engineered AI integration pipelines connecting local and cloud LLM endpoints for automated document classification and payload extraction.
+- Structured relational schemas in PostgreSQL and optimized SQL queries, cutting p95 response latencies by 35%.
+- Implemented asynchronous event delivery and queue consumers using RabbitMQ and Redis to decouple critical path operations.
+- Collaborated on system architecture, project planning, and microservice containerization using Docker and CI/CD pipelines.
+
+BattleBucks
+Team Lead | 04/2024 - 03/2025
+- Led engineering initiatives, technical OKR planning, and sprint execution as Scrum Master across cross-functional teams.
+- Designed low-latency backend APIs and core SDK modules supporting multiplayer matchmaking and tournament synchronization.
+- Coordinated QA delivery schedules, code reviews, and integration milestones to meet release timelines.
+- Modeled and managed high-throughput state storage with Redis and MongoDB for player session data.
+
+Altworld
+Senior Software Engineer | 10/2023 - 03/2024
+- Engineered dynamic map generation systems and coordinate translation services for virtual world environments.
+- Implemented state validation logic and physics calculation services ensuring synchronized gameplay states.
+- Enhanced backend event processing throughput, reducing transaction bottlenecks during high-concurrency events.
+
+Hike Private Limited
+Senior Software Engineer | 01/2022 - 10/2023
+- Designed and deployed end-to-end telemetry, benchmarking, and real-time performance tracking services for Rush app.
+- Optimized network data serialization and API payloads, decreasing initial client cold-load times by 40%.
+- Engineered distributed event-logging consumers processing millions of gameplay events daily.
+
+99Games Private Limited
+Senior Software Engineer | 11/2020 - 12/2021
+- Led the implementation and backend service integration for the Food Land expansion feature in Star Chef 2.
+- Streamlined 3D asset delivery pipelines, caching configurations, and content delivery networks.
+- Optimized database query execution plans and eliminated connection pool exhaustion during peak events.
+
+JuegoStudio Private Limited
+Senior Software Engineer | 04/2018 - 11/2020
+- Developed networking layers and real-time state synchronization protocols for multiplayer titles including 8-ball pool.
+- Profiled memory allocation and network packet sizes to minimize bandwidth consumption across MMORPG services.
+- Designed extensible UI and state-management frameworks adopted across multiple client-server projects.
+
+Teapot Games
+Software Engineer | 01/2017 - 04/2018
+- Implemented networked physics algorithms and multiplayer synchronization mechanisms across distributed game servers.
+- Developed naval combat simulation logic, torpedo trajectory calculations, and tactical AI state machines for Enemy Waters.
+- Contributed to server-client synchronization layers for War Dogs, supporting over 5 million players.
+
+Microsoft
+Student Partner | 01/2016 - 01/2017
+- Developed and published mobile applications on the Windows platform following Microsoft design patterns.
+- Conducted technical demonstrations and developer workshops on cloud application fundamentals.
+
+PROJECTS
+
+Digital Signature App Microservices | Innoscripta
+- Engineered a modular microservice suite in Go providing cryptographic document signing, certificate verification, and audit logs.
+- Integrated AI-assisted validation routines that verify uploaded document structures before dispatching signature workflows.
+
+Rush Analytics & Benchmarking Architecture | Hike Private Limited
+- Architected telemetry collectors and analytical aggregation endpoints processing millions of daily active user metrics.
+- Built automated benchmarking suites to detect latency regressions across API updates.
+
+Multiplayer Tournament & Core SDK | BattleBucks
+- Developed a high-performance tournament backend managing player brackets, scoring calculations, and prize distribution.
+- Created reusable client SDK wrappers ensuring consistent authentication and network communication.
+
+EDUCATION
+
+Lovely Professional University
+Bachelor of Technology in Computer Science and Engineering | 2012 - 2016

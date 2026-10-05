@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApplyPilot - Live Autonomous Job & Application Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>ApplyPilot <span>Live</span></h1>
+          <p>Autonomous Application & Pipeline Dashboard</p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <!-- Profile Switcher -->
+        <div class="control-group">
+          <label for="profileSelect">Target Profile:</label>
+          <div class="select-wrapper">
+            <select id="profileSelect">
+              <option value="golang" selected>Golang Backend (Primary)</option>
+              <option value="gamedev">Game Development</option>
+              <option value="default">Global Profile</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Refresh Controller -->
+        <div class="control-group live-indicator-group">
+          <div class="live-pill" id="livePill">
+            <span class="pulse-dot"></span>
+            <span id="liveStatusText">LIVE MONITORING</span>
+          </div>
+          <div class="select-wrapper mini">
+            <select id="refreshRateSelect">
+              <option value="2000" selected>Auto 2s</option>
+              <option value="5000">Auto 5s</option>
+              <option value="10000">Auto 10s</option>
+              <option value="0">Paused</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-icon" id="btnManualRefresh" title="Refresh Now">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Real-time Live Activity Banner -->
+    <section class="live-activity-banner" id="liveActivityBanner">
+      <div class="live-activity-card">
+        <div class="activity-header">
+          <div class="activity-title">
+            <span class="badge badge-pulse" id="processStatusBadge">CHECKING ENGINE...</span>
+            <h2 id="activeProcessTitle">Scanning Pipeline Status...</h2>
+          </div>
+          <div class="activity-meta" id="activityMeta">
+            <span id="activityElapsed">Elapsed: --</span>
+            <span id="activityPid">PID: --</span>
+          </div>
+        </div>
+
+        <div class="activity-body">
+          <div class="current-task-info">
+            <div class="info-row">
+              <span class="info-label">Active Stage:</span>
+              <span class="info-val highlight" id="activeStageVal">Initializing</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Current Search Queries:</span>
+              <span class="info-val" id="activeQueriesVal">"golang backend engineer", "distributed systems"</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Target Regions:</span>
+              <span class="info-val" id="activeRegionsVal">Germany, Switzerland, US, Nordics</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Latest Engine Event:</span>
+              <span class="info-val mono text-cyan" id="latestEventVal">Connecting to ApplyPilot background stream...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Metrics Grid -->
+    <section class="kpi-grid">
+      <div class="kpi-card" data-stage="discovered">
+        <div class="kpi-icon icon-cyan">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+        </div>
+        <div class="kpi-content">
+          <span class="kpi-label">Discovered Jobs</span>
+          <div class="kpi-value" id="kpiDiscovered">0</div>
+          <span class="kpi-sub" id="kpiEnrichedSub">0 enriched</span>
+        </div>
+      </div>
+
+      <div class="kpi-card" data-stage="scored">
+        <div class="kpi-icon icon-violet">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </div>
+        <div class="kpi-content">
+          <span class="kpi-label">Scored by LLM</span>
+          <div class="kpi-value" id="kpiScored">0</div>
+          <span class="kpi-sub" id="kpiAvgScoreSub">Avg Score: --</span>
+        </div>
+      </div>
+
+      <div class="kpi-card highlight-card" data-stage="tailored">
+        <div class="kpi-icon icon-amber">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+        </div>
+        <div class="kpi-content">
+          <span class="kpi-label">Tailored Resumes</span>
+          <div class="kpi-value" id="kpiTailored">0</div>
+          <span class="kpi-sub" id="kpiPendingTailorSub">0 pending high-fit</span>
+        </div>
+      </div>
+
+      <div class="kpi-card ready-card" data-stage="ready">
+        <div class="kpi-icon icon-blue">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+        </div>
+        <div class="kpi-content">
+          <span class="kpi-label">Ready to Apply</span>
+          <div class="kpi-value" id="kpiReady">0</div>
+          <span class="kpi-sub">Min score & URL valid</span>
+        </div>
+      </div>
+
+      <div class="kpi-card success-card" data-stage="applied">
+        <div class="kpi-icon icon-emerald">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+          </svg>
+        </div>
+        <div class="kpi-content">
+          <span class="kpi-label">Jobs Applied</span>
+          <div class="kpi-value" id="kpiApplied">0</div>
+          <span class="kpi-sub text-emerald" id="kpiAppliedSub">0 submissions</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Analytics Row -->
+    <section class="analytics-row">
+      <!-- Score Distribution Bar Chart -->
+      <div class="analytics-card score-dist-card">
+        <div class="card-head">
+          <h3>Score Distribution (0 - 10)</h3>
+          <span class="hint">Click a score bar to filter jobs</span>
+        </div>
+        <div class="score-bars-container" id="scoreBarsContainer">
+          <!-- Filled dynamically by JavaScript -->
+          <div class="loading-placeholder">Loading score distribution...</div>
+        </div>
+      </div>
+
+      <!-- Jobs By Source -->
+      <div class="analytics-card sources-card">
+        <div class="card-head">
+          <h3>Jobs Discovered by Source / Portal</h3>
+          <span class="hint" id="totalSitesCount">-- sites</span>
+        </div>
+        <div class="sources-list" id="sourcesList">
+          <!-- Filled dynamically -->
+          <div class="loading-placeholder">Loading source portals...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <nav class="main-tabs">
+      <button class="tab-btn active" data-tab="tab-applied">
+        <span class="tab-icon">🚀</span>
+        Applied Jobs & Tailored Resumes
+        <span class="badge" id="tabAppliedCount">0</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-all-jobs">
+        <span class="tab-icon">📋</span>
+        All Discovered Jobs
+        <span class="badge" id="tabAllJobsCount">0</span>
+      </button>
+      <button class="tab-btn" data-tab="tab-live-feed">
+        <span class="tab-icon">⚡</span>
+        Live Activity & Engine Stream
+      </button>
+      <button class="tab-btn" data-tab="tab-search-config">
+        <span class="tab-icon">🎯</span>
+        Search Tiers & Config
+      </button>
+    </nav>
+
+    <!-- TAB 1: Applied Jobs & Tailored Resumes -->
+    <section class="tab-pane active" id="tab-applied">
+      <div class="section-toolbar">
+        <div class="search-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input type="text" id="appliedSearchInput" placeholder="Filter applied/tailored jobs by title, company...">
+        </div>
+        <div class="filter-group">
+          <button class="btn btn-sm btn-outline active" data-filter="all">All Available</button>
+          <button class="btn btn-sm btn-outline" data-filter="applied_only">Applied Only</button>
+          <button class="btn btn-sm btn-outline" data-filter="tailored_only">Tailored Resumes</button>
+        </div>
+      </div>
+
+      <div class="applied-jobs-grid" id="appliedJobsGrid">
+        <!-- Rendered dynamically -->
+        <div class="loading-state">
+          <div class="spinner"></div>
+          <p>Scanning database for applied and tailored jobs...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: All Discovered Jobs -->
+    <section class="tab-pane" id="tab-all-jobs">
+      <div class="section-toolbar">
+        <div class="search-box">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input type="text" id="jobsSearchInput" placeholder="Search title, keywords, company, location...">
+        </div>
+
+        <div class="filters-row">
+          <select id="filterStageSelect" class="form-select">
+            <option value="all">All Stages</option>
+            <option value="applied">Applied</option>
+            <option value="tailored">Tailored Resume Ready</option>
+            <option value="ready">Ready to Apply (7+)</option>
+            <option value="high">High Fit (Score >= 7)</option>
+            <option value="scored">All Scored (>= 5)</option>
+          </select>
+
+          <select id="filterSiteSelect" class="form-select">
+            <option value="all">All Sites / Sources</option>
+          </select>
+
+          <select id="filterMinScoreSelect" class="form-select">
+            <option value="">Any Fit Score</option>
+            <option value="8">Score >= 8 (Exceptional)</option>
+            <option value="7">Score >= 7 (Strong Match)</option>
+            <option value="5">Score >= 5 (Relevant)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="jobs-table-wrapper">
+        <table class="jobs-table">
+          <thead>
+            <tr>
+              <th style="width: 70px;">Score</th>
+              <th>Job Title & Company</th>
+              <th>Source</th>
+              <th>Location</th>
+              <th>Tailored Resume</th>
+              <th>Status</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTableBody">
+            <!-- Rendered dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB 3: Live Feed & Engine Activity -->
+    <section class="tab-pane" id="tab-live-feed">
+      <div class="feed-container">
+        <div class="feed-left">
+          <div class="feed-card">
+            <h3>Active Background Processes</h3>
+            <div id="runningProcessList" class="process-list">
+              <p class="empty-text">No active processes detected.</p>
+            </div>
+          </div>
+
+          <div class="feed-card">
+            <h3>Recent Tailored Resume Files</h3>
+            <div id="recentTailoredList" class="recent-files-list">
+              <p class="empty-text">Scanning directory...</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="feed-right">
+          <div class="feed-card full-height">
+            <div class="terminal-head">
+              <div class="terminal-dots">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="terminal-title">Real-Time Event Stream</span>
+              <button class="btn btn-sm btn-ghost" id="btnClearStream">Clear</button>
+            </div>
+            <div class="terminal-body" id="eventStreamLog">
+              <div class="log-line system">[SYSTEM] ApplyPilot live telemetry stream attached.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: Search Configuration -->
+    <section class="tab-pane" id="tab-search-config">
+      <div class="config-grid">
+        <div class="config-card">
+          <h3>Target Search Queries (from searches.yaml)</h3>
+          <ul class="query-list" id="configQueryList">
+            <li>Loading search queries...</li>
+          </ul>
+        </div>
+        <div class="config-card">
+          <h3>Target Search Regions</h3>
+          <ul class="location-list" id="configLocationList">
+            <li>Loading locations...</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal: Resume Viewer & Exporter -->
+  <div class="modal-backdrop" id="resumeModal">
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <span class="badge badge-accent">Tailored Resume</span>
+          <h2 id="modalResumeTitle">Resume Viewer</h2>
+          <span class="modal-subtitle" id="modalResumeFilename">file.txt</span>
+        </div>
+        <button class="modal-close" id="btnCloseResumeModal">&times;</button>
+      </div>
+
+      <div class="modal-toolbar">
+        <div class="modal-tabs">
+          <button class="subtab-btn active" data-subtab="formatted">Formatted ATS Preview</button>
+          <button class="subtab-btn" data-subtab="raw">Raw Text</button>
+          <button class="subtab-btn" data-subtab="report">Tailoring Report (AI)</button>
+        </div>
+
+        <div class="download-actions">
+          <a id="btnDownloadTxt" href="#" class="btn btn-secondary btn-sm" download>
+            📄 Download .txt
+          </a>
+          <a id="btnDownloadMd" href="#" class="btn btn-secondary btn-sm" download>
+            📝 Download .md
+          </a>
+          <a id="btnDownloadPdf" href="#" target="_blank" class="btn btn-primary btn-sm">
+            🖨️ Print / Save PDF
+          </a>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="subtab-content active" id="subtab-formatted">
+          <div class="resume-preview-sheet" id="resumeFormattedContent">
+            <!-- Formatted Resume injected here -->
+          </div>
+        </div>
+        <div class="subtab-content" id="subtab-raw">
+          <pre class="raw-code" id="resumeRawContent"></pre>
+        </div>
+        <div class="subtab-content" id="subtab-report">
+          <div class="report-box" id="resumeReportContent">
+            <!-- Report content -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Job Details & LLM Score Reasoning -->
+  <div class="modal-backdrop" id="jobModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="score-badge-large" id="modalJobScore">--</div>
+          <div>
+            <h2 id="modalJobTitle">Job Details</h2>
+            <span class="modal-subtitle" id="modalJobMeta">Company &bull; Location</span>
+          </div>
+        </div>
+        <button class="modal-close" id="btnCloseJobModal">&times;</button>
+      </div>
+      <div class="modal-body job-detail-body">
+        <div class="job-meta-grid">
+          <div class="job-meta-item">
+            <span class="meta-label">Source Board:</span>
+            <span class="meta-value" id="modalJobSite">--</span>
+          </div>
+          <div class="job-meta-item">
+            <span class="meta-label">Salary:</span>
+            <span class="meta-value" id="modalJobSalary">Not specified</span>
+          </div>
+          <div class="job-meta-item">
+            <span class="meta-label">Discovered:</span>
+            <span class="meta-value" id="modalJobDiscovered">--</span>
+          </div>
+          <div class="job-meta-item">
+            <span class="meta-label">Application Status:</span>
+            <span class="meta-value" id="modalJobAppliedStatus">Not applied yet</span>
+          </div>
+        </div>
+
+        <div class="reasoning-card">
+          <h4>LLM Fit Score Analysis:</h4>
+          <p id="modalJobReasoning">No reasoning provided.</p>
+        </div>
+
+        <div class="description-section">
+          <h4>Full Job Description:</h4>
+          <div class="job-desc-content" id="modalJobDescription">
+            Loading description...
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a id="modalJobApplyBtn" href="#" target="_blank" class="btn btn-primary">
+          Open Original Job Post &rarr;
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
