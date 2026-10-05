@@ -992,10 +992,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
                 if stage in ("error", "errors", "issues"):
                     where_clauses.append("(apply_error IS NOT NULL OR detail_error IS NOT NULL)")
-                elif stage == "applied":
+                elif stage in ("applied", "applied_only"):
                     where_clauses.append("(applied_at IS NOT NULL OR apply_status IS NOT NULL)")
-                elif stage == "tailored":
+                elif stage in ("tailored", "tailored_only"):
                     where_clauses.append("tailored_resume_path IS NOT NULL")
+                elif stage in ("applied_tailored", "applied_or_tailored", "all_applied"):
+                    where_clauses.append("(applied_at IS NOT NULL OR apply_status IS NOT NULL OR tailored_resume_path IS NOT NULL)")
                 elif stage == "ready":
                     where_clauses.append("fit_score >= 7 AND full_description IS NOT NULL AND applied_at IS NULL")
                 elif stage == "scored":

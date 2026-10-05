@@ -2457,6 +2457,129 @@ tr.row-selected {
   100% { box-shadow: 0 0 20px rgba(59, 130, 246, 0.7); }
 }
 
+/* ── Topmost Header Bulk Actions & Table Column Styling ─────────────── */
+.header-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.btn-header-auto-apply {
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #fff;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.25s ease;
+  cursor: pointer;
+}
+
+.btn-header-auto-apply:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+}
+
+.btn-header-auto-apply.has-selected {
+  background: linear-gradient(135deg, #1d4ed8, #6366f1);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.65), 0 0 8px rgba(59, 130, 246, 0.4);
+  border-color: #818cf8;
+  animation: btnGlowPulse 1.8s infinite alternate;
+}
+
+/* Dedicated Open Original Job Button */
+.btn-open-orig-job {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.06);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.btn-open-orig-job:hover {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #38bdf8;
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(56, 189, 248, 0.25);
+}
+
+/* Dedicated Start Auto Apply Button */
+.btn-row-start-apply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-row-start-apply:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* Dedicated Re-apply Button */
+.btn-row-reapply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-row-reapply:hover {
+  background: rgba(16, 185, 129, 0.25);
+  color: #fff;
+  border-color: #34d399;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 12px rgba(16, 185, 129, 0.4);
+}
+
+.col-original-job, .col-start-apply {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.btn-card-open-orig {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+  text-decoration: none;
+}
+.btn-card-open-orig:hover {
+  border-color: #38bdf8;
+  color: #fff;
+}
+
 /* ========================================================================= */
 /* IN-ROW MILESTONE PROGRESS BAR WIDGET                                     */
 /* ========================================================================= */

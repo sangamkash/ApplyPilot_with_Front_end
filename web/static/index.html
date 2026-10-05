@@ -633,27 +633,92 @@
         </button>
       </nav>
 
-      <!-- TAB 1: Applied Jobs & Tailored Resumes -->
+      <!-- TAB 1: Applied Jobs & Tailored Resumes Table -->
       <section class="tab-pane active" id="tab-applied">
         <div class="section-toolbar">
           <div class="search-box">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
             </svg>
-            <input type="text" id="appliedSearchInput" placeholder="Filter applied/tailored jobs by title, company...">
+            <input type="text" id="appliedSearchInput" placeholder="Search title, keywords, company, location...">
           </div>
-          <div class="filter-group">
-            <button class="btn btn-sm btn-outline active" data-filter="all">All Available</button>
-            <button class="btn btn-sm btn-outline" data-filter="applied_only">Applied Only</button>
-            <button class="btn btn-sm btn-outline" data-filter="tailored_only">Tailored Resumes</button>
+
+          <div class="filters-row">
+            <select id="filterAppliedStageSelect" class="form-select">
+              <option value="all">All Applied Jobs</option>
+              <option value="with_resume">📄 With Tailored ATS Resume</option>
+              <option value="errors">⚠️ Had Previous Issues</option>
+            </select>
+
+            <select id="filterAppliedSiteSelect" class="form-select">
+              <option value="all">All Sites / Sources</option>
+            </select>
+
+            <select id="filterAppliedMinScoreSelect" class="form-select">
+              <option value="">Any Fit Score</option>
+              <option value="8">Score &ge; 8 (Exceptional)</option>
+              <option value="7">Score &ge; 7 (Strong Match)</option>
+              <option value="5">Score &ge; 5 (Relevant)</option>
+              <option value="3">Score &ge; 3 (Exploratory)</option>
+            </select>
+
+            <div class="header-bulk-actions" id="headerAppliedBulkActions">
+              <button id="btnHeaderAppliedAutoApply" class="btn btn-primary btn-glow btn-header-auto-apply" title="Click to Re-apply to selected jobs">
+                ⚡ Re-apply (<span id="headerAppliedSelectedCount">0</span>)
+              </button>
+              <button id="btnHeaderAppliedSelectAll" class="btn btn-sm btn-outline" title="Select all visible applied jobs in this tab">
+                Select All
+              </button>
+              <button id="btnHeaderAppliedClearSelection" class="btn btn-sm btn-ghost hidden" title="Clear selection">
+                ✕ Clear
+              </button>
+            </div>
           </div>
         </div>
 
-        <div class="applied-jobs-grid" id="appliedJobsGrid">
-          <div class="loading-state">
-            <div class="spinner"></div>
-            <p>Scanning database for applied and tailored jobs...</p>
+        <!-- Floating Multi-Select Bulk Action Bar for Applied Jobs Tab -->
+        <div id="bulkAppliedActionBar" class="bulk-action-bar hidden">
+          <div class="bulk-action-info">
+            <span class="bulk-pulse-indicator"></span>
+            <span class="bulk-label"><strong id="bulkAppliedSelectedCount">0</strong> jobs selected</span>
           </div>
+          <div class="bulk-action-buttons">
+            <button id="btnBulkAppliedAutoApply" class="btn btn-sm btn-primary btn-glow">
+              ⚡ Re-apply Selected (<span id="bulkAppliedApplyCount">0</span>)
+            </button>
+            <button id="btnBulkAppliedManualApply" class="btn btn-sm btn-outline">
+              🔗 Open Selected in Tabs
+            </button>
+            <button id="btnBulkAppliedMarkApplied" class="btn btn-sm btn-success">
+              ✓ Mark as Applied
+            </button>
+            <button id="btnBulkAppliedDeselect" class="btn btn-sm btn-ghost">
+              ✕ Deselect All
+            </button>
+          </div>
+        </div>
+
+        <div class="jobs-table-wrapper">
+          <table class="jobs-table">
+            <thead>
+              <tr>
+                <th style="width: 44px; text-align: center; cursor: pointer;" id="thSelectAllApplied" title="Click to select/deselect all visible jobs">
+                  <input type="checkbox" id="selectAllAppliedCheckbox" class="custom-checkbox" title="Select all visible applied/tailored jobs">
+                </th>
+                <th style="width: 65px;">Score</th>
+                <th>Job Title &amp; Company</th>
+                <th>Source</th>
+                <th>Location</th>
+                <th>Tailored Resume</th>
+                <th style="min-width: 220px;">Status &amp; Milestones</th>
+                <th style="text-align: center; min-width: 140px;">Open Original Job</th>
+                <th style="text-align: center; min-width: 150px;">Auto Apply / Re-apply</th>
+              </tr>
+            </thead>
+            <tbody id="appliedJobsTableBody">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -723,6 +788,16 @@
               <option value="5">Score &ge; 5 (Relevant)</option>
               <option value="3">Score &ge; 3 (Exploratory)</option>
             </select>
+          <div class="header-bulk-actions" id="headerBulkActions">
+            <button id="btnHeaderAutoApply" class="btn btn-primary btn-glow btn-header-auto-apply" title="Click to Auto Apply to selected jobs">
+              ⚡ Auto Apply (<span id="headerSelectedCount">0</span>)
+            </button>
+            <button id="btnHeaderSelectReady" class="btn btn-sm btn-outline" title="Select all visible jobs with tailored resume ready to apply">
+              Select Ready (7+)
+            </button>
+            <button id="btnHeaderClearSelection" class="btn btn-sm btn-ghost hidden" title="Clear selection">
+              ✕ Clear
+            </button>
           </div>
         </div>
 
@@ -760,8 +835,9 @@
                 <th>Source</th>
                 <th>Location</th>
                 <th>Tailored Resume</th>
-                <th style="min-width: 250px;">Status &amp; Milestones</th>
-                <th style="text-align: right; min-width: 210px;">Actions</th>
+                <th style="min-width: 220px;">Status &amp; Milestones</th>
+                <th style="text-align: center; min-width: 140px;">Open Original Job</th>
+                <th style="text-align: center; min-width: 150px;">Start Auto Apply</th>
               </tr>
             </thead>
             <tbody id="jobsTableBody">
