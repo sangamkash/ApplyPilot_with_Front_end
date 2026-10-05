@@ -224,7 +224,7 @@ def _run_auto_apply_job(profile_name: str, url: str):
     job_info = {"title": "Job Application", "site": "Portal"}
     if conn:
         try:
-            r = conn.execute("SELECT title, site FROM jobs WHERE url = ?", (url,)).fetchone()
+            r = conn.execute("SELECT title, site FROM jobs WHERE url = ? OR application_url = ?", (url, url)).fetchone()
             if r:
                 job_info["title"] = r["title"] or "Job Application"
                 job_info["site"] = r["site"] or "Portal"
@@ -271,8 +271,8 @@ def _run_auto_apply_job(profile_name: str, url: str):
         try:
             now_iso = datetime.now(timezone.utc).isoformat()
             wconn.execute(
-                "UPDATE jobs SET apply_status = 'applied', applied_at = ?, apply_error = NULL WHERE url = ?",
-                (now_iso, url),
+                "UPDATE jobs SET apply_status = 'applied', applied_at = ?, apply_error = NULL WHERE url = ? OR application_url = ?",
+                (now_iso, url, url),
             )
             wconn.commit()
             wconn.close()

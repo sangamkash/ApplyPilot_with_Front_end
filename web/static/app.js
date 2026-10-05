@@ -1682,7 +1682,15 @@ Bachelor of Science in Computer Science`;
   }
 
   function updateRowMilestoneDOM(url, task) {
-    const rows = document.querySelectorAll(`tr[data-job-url="${CSS.escape(url)}"]`);
+    let rows = [];
+    try {
+      rows = Array.from(document.querySelectorAll(`tr[data-job-url="${CSS.escape(url)}"]`));
+    } catch (_) {}
+    if (!rows || rows.length === 0) {
+      rows = Array.from(document.querySelectorAll('tr[data-job-url]')).filter(
+        (r) => r.getAttribute('data-job-url') === url
+      );
+    }
     if (!rows || rows.length === 0) return;
 
     rows.forEach((row) => {
