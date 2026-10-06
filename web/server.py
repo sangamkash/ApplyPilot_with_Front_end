@@ -84,13 +84,44 @@ def _sync_repo_profile_to_user_dir(profile_id: str, target_dir: Path):
     if repo_resume.exists() and not dest_resume.exists():
         shutil.copy2(repo_resume, dest_resume)
 
-    # .env
+    # .env - ensure valid keys overwrite placeholders
     dest_env = target_dir / ".env"
-    if not dest_env.exists():
-        if (REPO_DIR / ".env").exists():
-            shutil.copy2(REPO_DIR / ".env", dest_env)
-        elif (BASE_APPLYPILOT / ".env").exists():
-            shutil.copy2(BASE_APPLYPILOT / ".env", dest_env)
+    repo_env = REPO_DIR / ".env"
+    if repo_env.exists():
+        if not dest_env.exists():
+            shutil.copy2(repo_env, dest_env)
+        else:
+            try:
+                dest_text = dest_env.read_text(encoding="utf-8")
+                dest_lines = dest_text.splitlines()
+                repo_lines = repo_env.read_text(encoding="utf-8").splitlines()
+                for rline in repo_lines:
+                    rline = rline.strip()
+                    if not rline or rline.startswith("#") or "=" not in rline:
+                        continue
+                    k, v = rline.split("=", 1)
+                    k, v = k.strip(), v.strip().strip("'\"")
+                    if not v or "YOUR_" in v or "your_" in v:
+                        continue
+                    replaced = False
+                    for i, dline in enumerate(dest_lines):
+                        dline_s = dline.strip()
+                        if "=" in dline_s and not dline_s.startswith("#"):
+                            dk, dv = dline_s.split("=", 1)
+                            dk = dk.strip()
+                            dv = dv.strip().strip("'\"")
+                            if dk == k:
+                                if not dv or "YOUR_" in dv or "your_" in dv:
+                                    dest_lines[i] = f"{k}={v}"
+                                replaced = True
+                                break
+                    if not replaced:
+                        dest_lines.append(f"{k}={v}")
+                dest_env.write_text("\n".join(dest_lines) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+    elif (BASE_APPLYPILOT / ".env").exists() and not dest_env.exists():
+        shutil.copy2(BASE_APPLYPILOT / ".env", dest_env)
 
 
 def get_profile_dir(profile_name: str | None) -> Path:
@@ -209,17 +240,47 @@ def sync_tailored_resumes(profile_dir: Path) -> int:
 AUTO_APPLY_TASKS: dict[str, dict] = {}
 AUTO_APPLY_LOCK = threading.Lock()
 
+def _tasks_file(profile_name: str) -> Path:
+    return get_profile_dir(profile_name) / "auto_apply_tasks.json"
+
+def _save_auto_apply_tasks(profile_name: str):
+    try:
+        p_file = _tasks_file(profile_name)
+        with AUTO_APPLY_LOCK:
+            tasks_to_save = {k: dict(v) for k, v in AUTO_APPLY_TASKS.items() if v.get("profile") == profile_name}
+        tmp_file = p_file.with_suffix(".tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(tasks_to_save, f, indent=2)
+        tmp_file.replace(p_file)
+    except Exception as e:
+        logger.warning(f"Error saving auto apply tasks: {e}")
+
+def _load_auto_apply_tasks(profile_name: str):
+    try:
+        p_file = _tasks_file(profile_name)
+        if p_file.exists():
+            with open(p_file, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                with AUTO_APPLY_LOCK:
+                    for k, v in loaded.items():
+                        if k not in AUTO_APPLY_TASKS:
+                            AUTO_APPLY_TASKS[k] = v
+    except Exception as e:
+        logger.warning(f"Error loading auto apply tasks: {e}")
+
 APPLY_MILESTONES = [
-    {"index": 1, "name": "Form Detection & Navigation", "pct": 20, "desc": "Accessing target portal & identifying ATS framework..."},
-    {"index": 2, "name": "Applicant Data Matching", "pct": 40, "desc": "Matching profile details, contact info & work authorization..."},
-    {"index": 3, "name": "Tailored Resume Attachment", "pct": 60, "desc": "Verifying and attaching tailored ATS resume..."},
-    {"index": 4, "name": "AI Screening Q&A", "pct": 80, "desc": "Formulating answers for role-specific screening questionnaires..."},
+    {"index": 1, "name": "Detail Enrichment (Stage 2)", "pct": 20, "desc": "Extracting full job requirements & direct application URL..."},
+    {"index": 2, "name": "AI Match Scoring (Stage 3)", "pct": 40, "desc": "Evaluating candidate resume match & ATS keywords (1-10)..."},
+    {"index": 3, "name": "Resume Tailoring (Stage 4)", "pct": 60, "desc": "Generating ATS-tailored resume & PDF compilation..."},
+    {"index": 4, "name": "Autonomous Apply (Stage 5)", "pct": 80, "desc": "Browser automation filling fields & attaching tailored resume..."},
     {"index": 5, "name": "Submission & Verification", "pct": 100, "desc": "Final review, application submitted & verified!"},
 ]
 
 
 def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
     profile_dir = get_profile_dir(profile_name)
+    _load_auto_apply_tasks(profile_name)
     conn = get_writable_db_connection(profile_dir)
     job_info = {"title": "Job Application", "site": "Portal", "tailored_resume_path": None}
     if conn:
@@ -232,9 +293,9 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                 job_info["title"] = r["title"] or "Job Application"
                 job_info["site"] = r["site"] or "Portal"
                 job_info["tailored_resume_path"] = r["tailored_resume_path"]
-            # For Re-apply or retry: reset status to pending so acquire_job will pick it up
+            # Mark status as in_progress in DB so SQLite is persistent source of truth
             conn.execute(
-                "UPDATE jobs SET apply_status = 'pending', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
+                "UPDATE jobs SET apply_status = 'in_progress', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
                 (url, url)
             )
             conn.commit()
@@ -259,19 +320,21 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
     with AUTO_APPLY_LOCK:
         AUTO_APPLY_TASKS[url] = {
             "url": url,
+            "profile": profile_name,
             "title": job_info["title"],
             "site": job_info["site"],
             "status": "in_progress",
             "percent": 15,
             "step_index": 1,
             "total_steps": 5,
-            "current_step": "Launching autonomous browser & Claude Code...",
+            "current_step": "Stage 2: Detail Enrichment (Scraping job requirements)...",
             "completed_steps": [],
-            "remaining_steps": ["Playwright MCP Connection", "Form Detection & Autofill", "Resume Attachment", "Submission"],
-            "log": [f"[{datetime.now().strftime('%H:%M:%S')}] Started Auto-Apply for {job_info['title']}"],
+            "remaining_steps": ["Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring", "Stage 5: Autonomous Apply", "Submission"],
+            "log": [f"[{datetime.now().strftime('%H:%M:%S')}] Started Auto-Apply Pipeline for {job_info['title']}"],
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
         }
+    _save_auto_apply_tasks(profile_name)
 
     log_dir = profile_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -327,50 +390,81 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                     if not task:
                         continue
 
-                    # Dynamic milestone detection based on real ApplyPilot + Claude output
-                    if "launching chrome" in lower_line or "launching apply pipeline" in lower_line:
+                    # Dynamic pipeline detection based on ApplyPilot stages
+                    if "stage 2" in lower_line or "detail enrichment" in lower_line:
                         task["step_index"] = 1
-                        task["percent"] = 25
-                        task["current_step"] = "Chrome & Playwright MCP Initializing"
+                        task["percent"] = 20
+                        task["current_step"] = "Stage 2: Detail Enrichment (Scraping requirements)"
                         task["completed_steps"] = []
-                        task["remaining_steps"] = ["Portal Navigation", "Form Autofill", "Resume Attachment", "Submission"]
+                        task["remaining_steps"] = ["Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring", "Stage 5: Autonomous Apply", "Submission"]
+                        if "enriched full description" in lower_line:
+                            task["log"].append(f"[{now_str}] Enriched job requirements & portal link")
+
+                    elif "stage 3" in lower_line or "ai match scoring" in lower_line or "match score:" in lower_line:
+                        task["step_index"] = 2
+                        task["percent"] = 40
+                        task["current_step"] = "Stage 3: AI Match Scoring"
+                        task["completed_steps"] = ["Stage 2: Detail Enrichment"]
+                        task["remaining_steps"] = ["Stage 4: Resume Tailoring", "Stage 5: Autonomous Apply", "Submission"]
+                        score_m = re.search(r"score:\s*(\d+)", lower_line)
+                        if score_m:
+                            task["score"] = int(score_m.group(1))
+                            task["log"].append(f"[{now_str}] AI evaluated match score: {task['score']}/10")
+
+                    elif "stage 4" in lower_line or "resume tailoring" in lower_line or "crafting ats-tailored" in lower_line:
+                        task["step_index"] = 3
+                        task["percent"] = 60
+                        task["current_step"] = "Stage 4: ATS Resume Tailoring & PDF"
+                        task["completed_steps"] = ["Stage 2: Detail Enrichment", "Stage 3: AI Match Scoring"]
+                        task["remaining_steps"] = ["Stage 5: Autonomous Apply", "Submission"]
+                        fn_m = re.search(r"successfully:\s*([^\s(]+\.txt)", clean_line)
+                        if fn_m:
+                            task["tailored_filename"] = fn_m.group(1)
+                            task["log"].append(f"[{now_str}] ATS resume tailored: {task['tailored_filename']}")
+
+                    elif "stage 5" in lower_line or "autonomous apply" in lower_line or "launching chrome" in lower_line or "launching apply pipeline" in lower_line or "launching auto-apply" in lower_line:
+                        task["step_index"] = 4
+                        task["percent"] = 75
+                        task["current_step"] = "Stage 5: Browser Initializing & Navigating"
+                        task["completed_steps"] = ["Stage 2: Detail Enrichment", "Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring"]
+                        task["remaining_steps"] = ["Form Autofill & Attachment", "Submission"]
                         task["log"].append(f"[{now_str}] Browser session active (CDP port initialized)")
 
-                    elif "starting:" in lower_line or "claude" in lower_line or "running" in lower_line:
-                        task["step_index"] = 2
-                        task["percent"] = 45
-                        task["current_step"] = "Claude Code Agent Navigating Portal"
-                        task["completed_steps"] = ["Browser Initialized"]
-                        task["remaining_steps"] = ["Form Detection & Autofill", "Resume Attachment", "Submission"]
-                        task["log"].append(f"[{now_str}] Claude Code session inspecting job application portal")
+                    elif "starting:" in lower_line or "claude" in lower_line or "gemini" in lower_line or "openai" in lower_line or "navigating" in lower_line:
+                        task["step_index"] = 4
+                        task["percent"] = 85
+                        task["current_step"] = "Stage 5: AI Agent Filling Application Form"
+                        task["completed_steps"] = ["Stage 2: Detail Enrichment", "Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring"]
+                        task["remaining_steps"] = ["Submission"]
+                        task["log"].append(f"[{now_str}] AI agent inspecting application fields")
 
-                    elif "tool" in lower_line or "fill" in lower_line or "input" in lower_line or "form" in lower_line:
-                        task["step_index"] = 3
-                        task["percent"] = 70
-                        task["current_step"] = "Filling Fields & Attaching ATS Resume"
-                        task["completed_steps"] = ["Browser Initialized", "Portal Navigated"]
-                        task["remaining_steps"] = ["AI Screening Questions", "Submission"]
+                    elif "tool" in lower_line or "fill" in lower_line or "input" in lower_line or "upload" in lower_line or "attach" in lower_line:
+                        task["step_index"] = 4
+                        task["percent"] = 90
+                        task["current_step"] = "Stage 5: Attaching ATS Resume & Form Data"
+                        task["completed_steps"] = ["Stage 2: Detail Enrichment", "Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring"]
+                        task["remaining_steps"] = ["Submission"]
                         task["log"].append(f"[{now_str}] Form autofill & document attachment in progress")
 
-                    elif "applied" in lower_line or "submitted" in lower_line:
+                    elif any(w in lower_line for w in ["applied & verified", "submitting application", "application submitted", "browser_submit_application"]):
                         task["step_index"] = 5
-                        task["percent"] = 95
+                        task["percent"] = 98
                         task["current_step"] = "Submitting Application & Verifying"
 
                     task["updated_at"] = datetime.now(timezone.utc).isoformat()
+                _save_auto_apply_tasks(profile_name)
 
         proc.wait()
 
         # Check DB state for real outcome
-        final_conn = get_db_connection(profile_dir)
+        final_conn = get_writable_db_connection(profile_dir)
         db_job = None
         if final_conn:
             try:
                 db_job = final_conn.execute(
-                    "SELECT apply_status, applied_at, apply_error FROM jobs WHERE url = ? OR application_url = ?",
+                    "SELECT fit_score, tailored_resume_path, apply_status, applied_at, apply_error FROM jobs WHERE url = ? OR application_url = ?",
                     (url, url)
                 ).fetchone()
-                final_conn.close()
             except Exception:
                 pass
 
@@ -378,6 +472,12 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
         with AUTO_APPLY_LOCK:
             task = AUTO_APPLY_TASKS.get(url)
             if task:
+                if db_job:
+                    if db_job["fit_score"] is not None:
+                        task["score"] = db_job["fit_score"]
+                    if db_job["tailored_resume_path"]:
+                        task["tailored_filename"] = Path(db_job["tailored_resume_path"]).name
+
                 apply_status = db_job["apply_status"] if db_job else None
                 apply_error = db_job["apply_error"] if db_job else None
 
@@ -386,9 +486,9 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                     task["percent"] = 100
                     task["step_index"] = 5
                     task["current_step"] = "Application Submitted & Verified"
-                    task["completed_steps"] = ["Browser Initialized", "Portal Navigated", "Form Autofill", "Resume Attached", "Submitted"]
+                    task["completed_steps"] = ["Stage 2: Detail Enrichment", "Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring", "Stage 5: Autonomous Apply", "Submission"]
                     task["remaining_steps"] = []
-                    task["log"].append(f"[{now_str}] ✅ Successfully submitted and recorded in database.")
+                    task["log"].append(f"[{now_str}] ✅ Successfully submitted and verified in database.")
                 elif apply_status == "failed" or apply_error:
                     err_msg = apply_error or "Application was marked as failed"
                     task["status"] = "failed"
@@ -396,20 +496,46 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                     task["percent"] = 100
                     task["current_step"] = f"Failed: {err_msg[:40]}"
                     task["log"].append(f"[{now_str}] ❌ Application obstacle/error: {err_msg}")
+                    if final_conn and apply_status != "failed":
+                        try:
+                            final_conn.execute("UPDATE jobs SET apply_status = 'failed', apply_error = ? WHERE url = ? OR application_url = ?", (err_msg, url, url))
+                            final_conn.commit()
+                        except Exception:
+                            pass
                 elif proc.returncode != 0:
                     task["status"] = "failed"
                     task["error"] = f"ApplyPilot exited with code {proc.returncode}"
                     task["percent"] = 100
                     task["current_step"] = f"Process error (code {proc.returncode})"
                     task["log"].append(f"[{now_str}] ❌ Process exited with error code {proc.returncode}")
+                    if final_conn:
+                        try:
+                            final_conn.execute("UPDATE jobs SET apply_status = 'failed', apply_error = ? WHERE url = ? OR application_url = ?", (task["error"], url, url))
+                            final_conn.commit()
+                        except Exception:
+                            pass
                 else:
-                    # Clean completion
-                    task["status"] = "completed"
+                    # CLI finished without setting apply_status to applied - mark unverified/incomplete
+                    err_msg = apply_error or "Application was not completed or unverified"
+                    task["status"] = "failed"
+                    task["error"] = err_msg
                     task["percent"] = 100
-                    task["current_step"] = "Apply Workflow Completed"
-                    task["log"].append(f"[{now_str}] Apply workflow finished.")
+                    task["current_step"] = f"Unverified: {err_msg[:35]}"
+                    task["log"].append(f"[{now_str}] ⚠️ Application not submitted or unverified on employer portal.")
+                    if final_conn:
+                        try:
+                            final_conn.execute("UPDATE jobs SET apply_status = 'failed', apply_error = ? WHERE url = ? OR application_url = ?", (err_msg, url, url))
+                            final_conn.commit()
+                        except Exception:
+                            pass
 
                 task["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if final_conn:
+            try:
+                final_conn.close()
+            except Exception:
+                pass
+        _save_auto_apply_tasks(profile_name)
 
     except Exception as e:
         now_str = datetime.now().strftime('%H:%M:%S')
@@ -421,6 +547,15 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                 task["current_step"] = f"Error: {str(e)[:40]}"
                 task["log"].append(f"[{now_str}] Exception: {str(e)}")
                 task["updated_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            conn_err = get_writable_db_connection(profile_dir)
+            if conn_err:
+                conn_err.execute("UPDATE jobs SET apply_status = 'failed', apply_error = ? WHERE url = ? OR application_url = ?", (str(e), url, url))
+                conn_err.commit()
+                conn_err.close()
+        except Exception:
+            pass
+        _save_auto_apply_tasks(profile_name)
 
 
 def discover_all_profiles() -> list[dict]:
@@ -544,7 +679,7 @@ def discover_all_profiles() -> list[dict]:
                 try:
                     stats["total_jobs"] = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
                     stats["scored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE fit_score IS NOT NULL").fetchone()[0]
-                    stats["applied"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL").fetchone()[0]
+                    stats["applied"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE (apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')))").fetchone()[0]
                     stats["apply_errors"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL").fetchone()[0]
                     stats["tailored"] = conn.execute("SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL").fetchone()[0]
                 except Exception:
@@ -1011,11 +1146,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
                 ready_to_apply = conn.execute("""
                     SELECT COUNT(*) FROM jobs 
-                    WHERE fit_score >= 7 AND full_description IS NOT NULL AND application_url IS NOT NULL AND applied_at IS NULL
+                    WHERE fit_score >= 7 AND full_description IS NOT NULL AND application_url IS NOT NULL 
+                    AND (applied_at IS NULL AND (apply_status IS NULL OR apply_status != 'applied'))
                 """).fetchone()[0]
-                applied = conn.execute("SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL").fetchone()[0]
-                apply_errors = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_error IS NOT NULL").fetchone()[0]
-                in_progress = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status = 'applying' OR apply_status = 'starting'").fetchone()[0]
+                applied = conn.execute("SELECT COUNT(*) FROM jobs WHERE (apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')))").fetchone()[0]
+                apply_errors = conn.execute("SELECT COUNT(*) FROM jobs WHERE (apply_error IS NOT NULL OR detail_error IS NOT NULL)").fetchone()[0]
+                in_progress = conn.execute("SELECT COUNT(*) FROM jobs WHERE apply_status IN ('in_progress', 'applying', 'starting', 'pending')").fetchone()[0]
+                with AUTO_APPLY_LOCK:
+                    in_progress = max(in_progress, sum(1 for t in AUTO_APPLY_TASKS.values() if t.get("status") == "in_progress"))
 
                 # Detailed application error breakdown
                 error_breakdown = []
@@ -1044,7 +1182,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                            SUM(CASE WHEN fit_score >= 7 THEN 1 ELSE 0 END) as high_fit,
                            SUM(CASE WHEN fit_score >= 5 THEN 1 ELSE 0 END) as mid_fit,
                            ROUND(AVG(fit_score), 1) as avg_score,
-                           SUM(CASE WHEN applied_at IS NOT NULL THEN 1 ELSE 0 END) as applied,
+                           SUM(CASE WHEN apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')) THEN 1 ELSE 0 END) as applied,
                            SUM(CASE WHEN apply_error IS NOT NULL THEN 1 ELSE 0 END) as errors
                     FROM jobs 
                     GROUP BY site 
@@ -1103,18 +1241,49 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
 
             try:
                 min_score = query.get("min_score", [None])[0]
+                exact_score = query.get("exact_score", [None])[0] or query.get("score", [None])[0]
                 stage = query.get("stage", ["all"])[0].lower()
                 search = query.get("search", [""])[0].strip()
                 site = query.get("site", ["all"])[0]
-                limit = int(query.get("limit", [100])[0])
-                offset = int(query.get("offset", [0])[0])
+                limit_raw = query.get("limit", ["50"])[0]
+                if limit_raw == "all" or (isinstance(limit_raw, str) and limit_raw.lower() == "all"):
+                    limit = None
+                else:
+                    try:
+                        limit = int(limit_raw) if int(limit_raw) > 0 else None
+                    except ValueError:
+                        limit = 50
+                offset = max(int(query.get("offset", [0])[0]), 0)
 
                 where_clauses = []
                 params = []
 
-                if min_score is not None and min_score != "":
-                    where_clauses.append("fit_score >= ?")
-                    params.append(int(min_score))
+                score_range = query.get("score_range", [None])[0] or query.get("range", [None])[0]
+                if exact_score is not None and exact_score != "":
+                    where_clauses.append("fit_score = ?")
+                    params.append(int(exact_score))
+                elif score_range is not None and score_range != "":
+                    if "-" in score_range:
+                        s_min, s_max = score_range.split("-", 1)
+                        where_clauses.append("fit_score >= ? AND fit_score <= ?")
+                        params.extend([int(s_min.strip()), int(s_max.strip())])
+                    elif score_range.endswith("+"):
+                        where_clauses.append("fit_score >= ?")
+                        params.append(int(score_range[:-1].strip()))
+                    else:
+                        where_clauses.append("fit_score = ?")
+                        params.append(int(score_range.strip()))
+                elif min_score is not None and min_score != "":
+                    if "-" in str(min_score):
+                        s_min, s_max = str(min_score).split("-", 1)
+                        where_clauses.append("fit_score >= ? AND fit_score <= ?")
+                        params.extend([int(s_min.strip()), int(s_max.strip())])
+                    elif str(min_score).endswith("+"):
+                        where_clauses.append("fit_score >= ?")
+                        params.append(int(str(min_score)[:-1].strip()))
+                    else:
+                        where_clauses.append("fit_score >= ?")
+                        params.append(int(min_score))
 
                 if site and site != "all":
                     where_clauses.append("site = ?")
@@ -1123,13 +1292,15 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 if stage in ("error", "errors", "issues"):
                     where_clauses.append("(apply_error IS NOT NULL OR detail_error IS NOT NULL)")
                 elif stage in ("applied", "applied_only"):
-                    where_clauses.append("(applied_at IS NOT NULL OR apply_status IS NOT NULL)")
+                    where_clauses.append("(apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')))")
                 elif stage in ("tailored", "tailored_only"):
                     where_clauses.append("tailored_resume_path IS NOT NULL")
                 elif stage in ("applied_tailored", "applied_or_tailored", "all_applied"):
-                    where_clauses.append("(applied_at IS NOT NULL OR apply_status IS NOT NULL OR tailored_resume_path IS NOT NULL)")
+                    where_clauses.append("(apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')) OR tailored_resume_path IS NOT NULL OR apply_status IN ('in_progress', 'applying', 'starting', 'pending'))")
+                elif stage in ("in_progress", "applying", "starting", "pending"):
+                    where_clauses.append("apply_status IN ('in_progress', 'applying', 'starting', 'pending')")
                 elif stage == "ready":
-                    where_clauses.append("fit_score >= 7 AND full_description IS NOT NULL AND applied_at IS NULL")
+                    where_clauses.append("fit_score >= 7 AND full_description IS NOT NULL AND (applied_at IS NULL AND (apply_status IS NULL OR apply_status NOT IN ('applied', 'in_progress', 'applying', 'starting', 'pending')))")
                 elif stage == "scored":
                     where_clauses.append("fit_score >= 5")
                 elif stage == "high":
@@ -1144,6 +1315,39 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 count_sql = f"SELECT COUNT(*) FROM jobs {where_sql}"
                 total_filtered = conn.execute(count_sql, params).fetchone()[0]
 
+                # Compute dynamic score distribution for current search/site/stage filters
+                dist_where = []
+                dist_params = []
+                if site and site != "all":
+                    dist_where.append("site = ?")
+                    dist_params.append(site)
+                if stage in ("error", "errors", "issues"):
+                    dist_where.append("(apply_error IS NOT NULL OR detail_error IS NOT NULL)")
+                elif stage in ("applied", "applied_only"):
+                    dist_where.append("(apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')))")
+                elif stage in ("tailored", "tailored_only"):
+                    dist_where.append("tailored_resume_path IS NOT NULL")
+                elif stage in ("applied_tailored", "applied_or_tailored", "all_applied"):
+                    dist_where.append("(apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')) OR tailored_resume_path IS NOT NULL OR apply_status IN ('in_progress', 'applying', 'starting', 'pending'))")
+                elif stage in ("in_progress", "applying", "starting", "pending"):
+                    dist_where.append("apply_status IN ('in_progress', 'applying', 'starting', 'pending')")
+                elif stage == "ready":
+                    dist_where.append("fit_score >= 7 AND full_description IS NOT NULL AND (applied_at IS NULL AND (apply_status IS NULL OR apply_status NOT IN ('applied', 'in_progress', 'applying', 'starting', 'pending')))")
+                elif stage == "scored":
+                    dist_where.append("fit_score >= 5")
+                elif stage == "high":
+                    dist_where.append("fit_score >= 7")
+                if search:
+                    dist_where.append("(title LIKE ? OR site LIKE ? OR location LIKE ? OR score_reasoning LIKE ?)")
+                    kw = f"%{search}%"
+                    dist_params.extend([kw, kw, kw, kw])
+                dist_where.append("fit_score IS NOT NULL")
+                dist_where_sql = "WHERE " + " AND ".join(dist_where)
+                dist_sql = f"SELECT fit_score, COUNT(*) as cnt FROM jobs {dist_where_sql} GROUP BY fit_score ORDER BY fit_score DESC"
+                dist_rows = conn.execute(dist_sql, dist_params).fetchall()
+                filtered_score_dist = {r[0]: r[1] for r in dist_rows}
+
+                limit_clause = f"LIMIT {limit} OFFSET {offset}" if limit is not None else f"OFFSET {offset}" if offset > 0 else ""
                 sql = f"""
                     SELECT url, title, salary, location, site, strategy, discovered_at,
                            detail_scraped_at, detail_error, application_url, fit_score, score_reasoning,
@@ -1157,9 +1361,9 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                         CASE WHEN applied_at IS NOT NULL THEN 0 ELSE 1 END,
                         CASE WHEN fit_score IS NOT NULL THEN fit_score ELSE -1 END DESC,
                         discovered_at DESC
-                    LIMIT ? OFFSET ?
+                    {limit_clause}
                 """
-                rows = conn.execute(sql, params + [limit, offset]).fetchall()
+                rows = conn.execute(sql, params).fetchall()
 
                 tailored_dir = profile_dir / "tailored_resumes"
                 tailored_files_map = {}
@@ -1197,6 +1401,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                     "limit": limit,
                     "offset": offset,
                     "jobs": jobs,
+                    "score_distribution": filtered_score_dist,
                 })
             except Exception as e:
                 if conn:
@@ -1233,8 +1438,48 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         if path == "/api/jobs/apply-status":
+            query_prof = query.get("profile", [profile_dir.name])[0]
+            _load_auto_apply_tasks(query_prof)
             with AUTO_APPLY_LOCK:
-                tasks_copy = {k: dict(v) for k, v in AUTO_APPLY_TASKS.items()}
+                tasks_copy = {k: dict(v) for k, v in AUTO_APPLY_TASKS.items() if v.get("profile", query_prof) == query_prof}
+
+            # In addition to in-memory tasks, check SQLite for any in-progress jobs to persist state across server restarts
+            conn = get_db_connection(profile_dir)
+            if conn:
+                try:
+                    in_prog_rows = conn.execute("""
+                        SELECT url, title, site, apply_status, fit_score, tailored_resume_path
+                        FROM jobs
+                        WHERE apply_status IN ('in_progress', 'applying', 'starting', 'pending')
+                    """).fetchall()
+                    for r in in_prog_rows:
+                        u = r["url"]
+                        if u not in tasks_copy:
+                            tasks_copy[u] = {
+                                "url": u,
+                                "profile": query_prof,
+                                "title": r["title"] or "Job Application",
+                                "site": r["site"] or "Portal",
+                                "status": "in_progress",
+                                "percent": 30,
+                                "step_index": 2,
+                                "total_steps": 5,
+                                "current_step": "In Progress (Auto Apply)...",
+                                "completed_steps": ["Stage 2: Detail Enrichment"],
+                                "remaining_steps": ["AI Match Scoring", "Resume Tailoring", "Autonomous Apply", "Submission"],
+                                "score": r["fit_score"],
+                                "tailored_filename": Path(r["tailored_resume_path"]).name if r["tailored_resume_path"] else None,
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "error": None,
+                            }
+                    conn.close()
+                except Exception:
+                    if conn:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+
             self.send_json({
                 "tasks": tasks_copy,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1809,6 +2054,7 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                                 AUTO_APPLY_TASKS[u]["current_step"] = "Marked as Applied"
                     conn.commit()
                     conn.close()
+                    _save_auto_apply_tasks(profile_name)
                     self.send_json({
                         "success": True,
                         "mode": "manual_mark",
@@ -1823,6 +2069,52 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
 
             # Autonomous Apply mode with real ApplyPilot CLI workflow
             dry_run = bool(data.get("dry_run", False))
+
+            # Immediately mark in DB and global task registry so state is persisted across reload & tabs
+            conn = get_writable_db_connection(profile_dir)
+            job_rows_map = {}
+            if conn:
+                try:
+                    for u in urls:
+                        r = conn.execute("SELECT title, site, fit_score, tailored_resume_path FROM jobs WHERE url = ? OR application_url = ?", (u, u)).fetchone()
+                        if r:
+                            job_rows_map[u] = dict(r)
+                        conn.execute(
+                            "UPDATE jobs SET apply_status = 'in_progress', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
+                            (u, u)
+                        )
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+            now_str = datetime.now().strftime('%H:%M:%S')
+            with AUTO_APPLY_LOCK:
+                for u in urls:
+                    j_info = job_rows_map.get(u, {})
+                    AUTO_APPLY_TASKS[u] = {
+                        "url": u,
+                        "profile": profile_name,
+                        "title": j_info.get("title") or "Job Application",
+                        "site": j_info.get("site") or "Portal",
+                        "status": "in_progress",
+                        "percent": 15,
+                        "step_index": 1,
+                        "total_steps": 5,
+                        "current_step": "Stage 2: Detail Enrichment (Scraping requirements)...",
+                        "completed_steps": [],
+                        "remaining_steps": ["Stage 3: AI Match Scoring", "Stage 4: Resume Tailoring", "Stage 5: Autonomous Apply", "Submission"],
+                        "score": j_info.get("fit_score"),
+                        "tailored_filename": Path(j_info["tailored_resume_path"]).name if j_info.get("tailored_resume_path") else None,
+                        "log": [f"[{now_str}] Started Auto-Apply Pipeline"],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "error": None,
+                    }
+            _save_auto_apply_tasks(profile_name)
+
             for u in urls:
                 t = threading.Thread(target=_run_auto_apply_job, args=(profile_name, u, dry_run), daemon=True)
                 t.start()

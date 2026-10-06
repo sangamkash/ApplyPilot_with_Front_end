@@ -26,7 +26,7 @@ console = Console()
 log = logging.getLogger(__name__)
 
 # Valid pipeline stages (in execution order)
-VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+VALID_STAGES = ("discover", "enrich", "score", "tailor", "cover", "pdf", "apply")
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +119,9 @@ def run(
     if any(s in stage_list for s in llm_stages) or "all" in stage_list:
         from applypilot.config import check_tier
         check_tier(2, "AI scoring/tailoring")
+    if "apply" in stage_list or "all" in stage_list:
+        from applypilot.config import check_tier
+        check_tier(3, "auto-apply")
 
     # Validate the --validation flag value
     valid_modes = ("strict", "normal", "lenient")
@@ -152,6 +155,16 @@ def apply(
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
     url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
+    pipeline: bool = typer.Option(
+        True,
+        "--pipeline/--no-pipeline",
+        help="Automatically run pipeline stages 2, 3, 4 (enrich, score, tailor) before applying to a targeted URL.",
+    ),
+    validation: str = typer.Option(
+        "normal",
+        "--validation",
+        help="Validation strictness for resume tailoring: strict, normal, or lenient.",
+    ),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
     mark_failed: Optional[str] = typer.Option(None, "--mark-failed", help="Manually mark a job URL as failed (provide URL)."),
@@ -184,6 +197,16 @@ def apply(
         console.print(f"[green]Reset {count} failed job(s) for retry.[/green]")
         return
 
+    # --- Targeted row pre-apply pipeline: Stages 2 (enrich), 3 (score), 4 (tailor) ---
+    if url and pipeline:
+        from applypilot.pipeline import run_single_job_pipeline
+        run_single_job_pipeline(
+            url=url,
+            min_score=min_score,
+            validation_mode=validation,
+            force=False,
+        )
+
     # --- Full apply mode ---
 
     # Check 1: Tier 3 required (Claude Code CLI + Chrome)
@@ -211,7 +234,7 @@ def apply(
             console.print(f"[red]Job not found for URL:[/red] {url}")
             raise typer.Exit(code=1)
         # If job was previously applied or failed (re-apply scenario), reset status so worker acquires it
-        if job_row[1] == "applied" or job_row[2] is not None:
+        if job_row[1] == "applied" or job_row[2] is not None or job_row[1] == "failed":
             conn.execute("""
                 UPDATE jobs
                 SET apply_status = 'pending', applied_at = NULL, apply_error = NULL
@@ -253,7 +276,11 @@ def apply(
 
     effective_limit = limit if limit is not None else (0 if continuous else 1)
 
+    from applypilot.apply.providers import get_active_provider_name
+    active_provider = get_active_provider_name()
+
     console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
+    console.print(f"  Provider: {active_provider}")
     console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
     console.print(f"  Workers:  {workers}")
     console.print(f"  Model:    {model}")
@@ -415,13 +442,33 @@ def doctor() -> None:
                         "Set GEMINI_API_KEY in ~/.applypilot/.env (run 'applypilot init')"))
 
     # --- Tier 3 checks ---
-    # Claude Code CLI
-    claude_bin = shutil.which("claude")
-    if claude_bin:
-        results.append(("Claude Code CLI", ok_mark, claude_bin))
-    else:
-        results.append(("Claude Code CLI", fail_mark,
-                        "Install from https://claude.ai/code (needed for auto-apply)"))
+    from applypilot.apply.providers import get_active_provider_name
+    active_provider = get_active_provider_name()
+    results.append(("Auto-Apply Provider", ok_mark, active_provider))
+
+    # Provider requirements
+    if active_provider == "gemini":
+        if os.environ.get("GEMINI_API_KEY"):
+            gmodel = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+            results.append(("Gemini Auto-Apply", ok_mark, f"Ready ({gmodel})"))
+        else:
+            results.append(("Gemini Auto-Apply", fail_mark, "GEMINI_API_KEY required for Gemini auto-apply"))
+    elif active_provider == "openai":
+        if os.environ.get("OPENAI_API_KEY"):
+            omodel = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+            results.append(("OpenAI Auto-Apply", ok_mark, f"Ready ({omodel})"))
+        else:
+            results.append(("OpenAI Auto-Apply", fail_mark, "OPENAI_API_KEY required for OpenAI auto-apply"))
+    else:  # claude
+        claude_bin = shutil.which("claude")
+        if claude_bin:
+            cmodel = os.environ.get("CLAUDE_MODEL", "sonnet")
+            results.append(("Claude Code CLI", ok_mark, f"{claude_bin} ({cmodel})"))
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            results.append(("Claude Auto-Apply", ok_mark, "ANTHROPIC_API_KEY configured"))
+        else:
+            results.append(("Claude Code CLI", fail_mark,
+                            "Install from https://claude.ai/code or set ANTHROPIC_API_KEY"))
 
     # Chrome
     try:

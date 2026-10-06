@@ -587,7 +587,11 @@
         <div class="analytics-card score-dist-card">
           <div class="card-head">
             <h3>Fit Score Distribution (0 - 10)</h3>
-            <span class="hint">Click bar to filter jobs table</span>
+            <span class="hint" id="scoreDistHint">Click bar to filter jobs table</span>
+          </div>
+          <div id="scoreFilterActiveBadge" class="score-filter-active-badge hidden">
+            <span>Filtered by Score: <strong id="activeScoreValue">--</strong></span>
+            <button type="button" id="btnClearScoreFilter" class="btn btn-xs btn-ghost" title="Clear score filter">✕ Clear</button>
           </div>
           <div class="score-bars-container" id="scoreBarsContainer">
             <div class="loading-placeholder">Loading fit scores...</div>
@@ -645,8 +649,10 @@
 
           <div class="filters-row">
             <select id="filterAppliedStageSelect" class="form-select">
-              <option value="all">All Applied Jobs</option>
+              <option value="all">All Applied & Tailored</option>
+              <option value="applied">Applied Submissions Only</option>
               <option value="with_resume">📄 With Tailored ATS Resume</option>
+              <option value="in_progress">⚡ In-Progress Auto Apply</option>
               <option value="errors">⚠️ Had Previous Issues</option>
             </select>
 
@@ -656,11 +662,19 @@
 
             <select id="filterAppliedMinScoreSelect" class="form-select">
               <option value="">Any Fit Score</option>
-              <option value="8">Score &ge; 8 (Exceptional)</option>
-              <option value="7">Score &ge; 7 (Strong Match)</option>
-              <option value="5">Score &ge; 5 (Relevant)</option>
-              <option value="3">Score &ge; 3 (Exploratory)</option>
+              <option value="8-10">Score 8 - 10 (High)</option>
+              <option value="6-7">Score 6 - 7 (Good)</option>
+              <option value="4-5">Score 4 - 5 (Moderate)</option>
+              <option value="0-3">Score 0 - 3 (Low)</option>
+              <option value="8">Score &ge; 8</option>
+              <option value="7">Score &ge; 7</option>
+              <option value="5">Score &ge; 5</option>
+              <option value="3">Score &ge; 3</option>
             </select>
+
+            <button type="button" id="btnResetAppliedFilters" class="btn btn-sm btn-ghost" title="Reset all applied filters">
+              ✕ Reset
+            </button>
 
             <div class="header-bulk-actions" id="headerAppliedBulkActions">
               <button id="btnHeaderAppliedAutoApply" class="btn btn-primary btn-glow btn-header-auto-apply" title="Click to Re-apply to selected jobs">
@@ -720,6 +734,7 @@
             </tbody>
           </table>
         </div>
+        <div class="table-pagination-footer" id="appliedPagination"></div>
       </section>
 
       <!-- TAB 2: Dedicated Application Errors Diagnostic Center -->
@@ -769,10 +784,11 @@
           <div class="filters-row">
             <select id="filterStageSelect" class="form-select">
               <option value="all">All Stages</option>
-              <option value="errors">⚠️ Application Errors</option>
-              <option value="applied">Applied</option>
-              <option value="tailored">Tailored Resume Ready</option>
+              <option value="in_progress">⚡ In-Progress Auto Apply</option>
               <option value="ready">Ready to Apply (7+)</option>
+              <option value="tailored">Tailored Resume Ready</option>
+              <option value="applied">Applied</option>
+              <option value="errors">⚠️ Application Errors</option>
               <option value="high">High Fit (Score &ge; 7)</option>
               <option value="scored">All Scored (&ge; 5)</option>
             </select>
@@ -783,11 +799,19 @@
 
             <select id="filterMinScoreSelect" class="form-select">
               <option value="">Any Fit Score</option>
-              <option value="8">Score &ge; 8 (Exceptional)</option>
-              <option value="7">Score &ge; 7 (Strong Match)</option>
-              <option value="5">Score &ge; 5 (Relevant)</option>
-              <option value="3">Score &ge; 3 (Exploratory)</option>
+              <option value="8-10">Score 8 - 10 (High)</option>
+              <option value="6-7">Score 6 - 7 (Good)</option>
+              <option value="4-5">Score 4 - 5 (Moderate)</option>
+              <option value="0-3">Score 0 - 3 (Low)</option>
+              <option value="8">Score &ge; 8</option>
+              <option value="7">Score &ge; 7</option>
+              <option value="5">Score &ge; 5</option>
+              <option value="3">Score &ge; 3</option>
             </select>
+
+            <button type="button" id="btnResetAllFilters" class="btn btn-sm btn-ghost" title="Reset all job filters">
+              ✕ Reset
+            </button>
           <div class="header-bulk-actions" id="headerBulkActions">
             <button id="btnHeaderAutoApply" class="btn btn-primary btn-glow btn-header-auto-apply" title="Click to Auto Apply to selected jobs">
               ⚡ Auto Apply (<span id="headerSelectedCount">0</span>)
@@ -845,6 +869,7 @@
             </tbody>
           </table>
         </div>
+        <div class="table-pagination-footer" id="jobsPagination"></div>
       </section>
 
       <!-- TAB 4: Live Feed & Engine Activity -->

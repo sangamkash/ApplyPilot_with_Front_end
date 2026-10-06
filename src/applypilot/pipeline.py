@@ -32,7 +32,7 @@ console = Console()
 # Stage definitions
 # ---------------------------------------------------------------------------
 
-STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf")
+STAGE_ORDER = ("discover", "enrich", "score", "tailor", "cover", "pdf", "apply")
 
 STAGE_META: dict[str, dict] = {
     "discover": {"desc": "Job discovery (JobSpy + Workday + smart extract)"},
@@ -41,6 +41,7 @@ STAGE_META: dict[str, dict] = {
     "tailor":   {"desc": "Resume tailoring (LLM + validation)"},
     "cover":    {"desc": "Cover letter generation"},
     "pdf":      {"desc": "PDF conversion (tailored resumes + cover letters)"},
+    "apply":    {"desc": "Autonomous application submission & live verification"},
 }
 
 # Upstream dependency: a stage only finishes when its upstream is done AND
@@ -52,6 +53,7 @@ _UPSTREAM: dict[str, str | None] = {
     "tailor":   "score",
     "cover":    "tailor",
     "pdf":      "cover",
+    "apply":    "pdf",
 }
 
 
@@ -154,6 +156,22 @@ def _run_pdf() -> dict:
         return {"status": f"error: {e}"}
 
 
+def _run_apply(limit: int = 0, min_score: int = 7, workers: int = 1, headless: bool = False) -> dict:
+    """Stage: Autonomous apply — apply to ready jobs using configured AI provider."""
+    try:
+        from applypilot.apply.launcher import main as apply_main
+        apply_main(
+            limit=limit,
+            min_score=min_score,
+            headless=headless,
+            workers=workers,
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        log.error("Apply stage failed: %s", e)
+        return {"status": f"error: {e}"}
+
+
 # Map stage names to their runner functions
 _STAGE_RUNNERS: dict[str, callable] = {
     "discover": _run_discover,
@@ -162,6 +180,7 @@ _STAGE_RUNNERS: dict[str, callable] = {
     "tailor":   _run_tailor,
     "cover":    _run_cover,
     "pdf":      _run_pdf,
+    "apply":    _run_apply,
 }
 
 
@@ -238,6 +257,12 @@ _PENDING_SQL: dict[str, str] = {
         "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
         "AND tailored_resume_path LIKE '%.txt'"
     ),
+    "apply": (
+        "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL "
+        "AND (apply_status IS NULL OR apply_status = 'failed') "
+        "AND (apply_attempts IS NULL OR apply_attempts < 3) "
+        "AND fit_score >= ?"
+    ),
 }
 
 # How long to sleep between polling loops in streaming mode (seconds)
@@ -275,6 +300,9 @@ def _run_stage_streaming(
         kwargs["min_score"] = min_score
         kwargs["validation_mode"] = validation_mode
     if stage in ("discover", "enrich"):
+        kwargs["workers"] = workers
+    if stage == "apply":
+        kwargs["min_score"] = min_score
         kwargs["workers"] = workers
 
     upstream = _UPSTREAM[stage]
@@ -346,6 +374,9 @@ def _run_sequential(ordered: list[str], min_score: int, workers: int = 1,
                 kwargs["min_score"] = min_score
                 kwargs["validation_mode"] = validation_mode
             if name in ("discover", "enrich"):
+                kwargs["workers"] = workers
+            if name == "apply":
+                kwargs["min_score"] = min_score
                 kwargs["workers"] = workers
             result = runner(**kwargs)
             elapsed = time.time() - t0
@@ -538,3 +569,238 @@ def run_pipeline(
     console.print(f"{'=' * 70}\n")
 
     return result
+
+
+def run_single_job_pipeline(
+    url: str,
+    min_score: int = 0,
+    validation_mode: str = "normal",
+    force: bool = True,
+) -> dict:
+    """Run pipeline stages 2 (enrich), 3 (score), and 4 (tailor) specifically for one job row.
+
+    Args:
+        url: Job URL or application URL matching the target row.
+        min_score: Minimum fit score threshold.
+        validation_mode: "strict", "normal", or "lenient".
+        force: If True, re-enriches and re-tailors even if previous data exists.
+
+    Returns:
+        Dict with canonical url, title, fit_score, tailored_resume_path, etc.
+    """
+    import json
+    import re
+    from datetime import timezone
+    from pathlib import Path
+
+    load_env()
+    ensure_dirs()
+    conn = get_connection()
+
+    clean_url = url.split("?")[0].rstrip("/")
+    like = f"%{clean_url}%" if clean_url else url
+    row = conn.execute("""
+        SELECT * FROM jobs
+        WHERE url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?
+        LIMIT 1
+    """, (url, url, like, like)).fetchone()
+
+    if not row:
+        row = conn.execute("SELECT * FROM jobs WHERE url = ?", (url,)).fetchone()
+        if not row:
+            raise ValueError(f"Job not found in database for URL: {url}")
+
+    if hasattr(row, "keys"):
+        job = dict(row)
+    else:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM jobs WHERE url = ?", (row[0],))
+        cols = [col[0] for col in cursor.description]
+        job = dict(zip(cols, row))
+    canonical_url = job["url"]
+
+    console.print(Panel.fit(
+        f"[bold cyan]Single-Job Pipeline (Stages 2 -> 3 -> 4)[/bold cyan]\n"
+        f"Job: [bold]{job.get('title', 'Unknown Role')}[/bold] at [bold]{job.get('site', 'Company')}[/bold]\n"
+        f"URL: {canonical_url}",
+        border_style="cyan",
+    ))
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Stage 2: Detail Enrichment (Data enrichment)
+    # ──────────────────────────────────────────────────────────────────────────
+    console.print(f"\n[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+    console.print(f"[bold cyan]▶ [STAGE 2: Detail Enrichment][/bold cyan] Scraping job requirements & direct application URL...")
+    console.print(f"[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+
+    from applypilot.enrichment.detail import resolve_url, scrape_detail_page, UA
+
+    target_scrape_url = job.get("application_url") or job.get("url") or canonical_url
+    resolved = resolve_url(target_scrape_url, job.get("site", ""))
+    if resolved:
+        target_scrape_url = resolved
+
+    needs_scrape = force or not job.get("full_description") or len(str(job.get("full_description", "")).strip()) < 100
+    scrape_success = False
+
+    if needs_scrape:
+        try:
+            from playwright.sync_api import sync_playwright
+            console.print("  [dim]Launching headless browser for detail extraction...[/dim]")
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(user_agent=UA)
+                page = context.new_page()
+                result = scrape_detail_page(page, target_scrape_url)
+                browser.close()
+
+                if result.get("full_description") and len(result["full_description"].strip()) >= 50:
+                    now = datetime.now(timezone.utc).isoformat()
+                    app_url = result.get("application_url") or job.get("application_url") or target_scrape_url
+                    conn.execute(
+                        "UPDATE jobs SET full_description = ?, application_url = ?, detail_scraped_at = ?, detail_error = NULL WHERE url = ?",
+                        (result["full_description"], app_url, now, canonical_url),
+                    )
+                    conn.commit()
+                    job["full_description"] = result["full_description"]
+                    job["application_url"] = app_url
+                    scrape_success = True
+                    console.print(f"  [bold green]✓ [STAGE 2][/bold green] Enriched full description ({len(result['full_description'])} characters)")
+                    if app_url != target_scrape_url:
+                        console.print(f"  [green]  Direct Apply URL: {app_url}[/green]")
+                else:
+                    console.print(f"  [yellow]! [STAGE 2] Scrape returned partial or empty description: {result.get('error', 'no content')}[/yellow]")
+        except Exception as e:
+            console.print(f"  [yellow]! [STAGE 2] Scrape attempt error: {e}[/yellow]")
+
+    if not scrape_success:
+        if job.get("full_description") and len(str(job["full_description"]).strip()) >= 50:
+            console.print(f"  [green]✓ [STAGE 2][/green] Using existing enriched description ({len(job['full_description'])} characters)")
+        elif job.get("description") and len(str(job["description"]).strip()) >= 30:
+            desc = job["description"].strip()
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute("UPDATE jobs SET full_description = ?, detail_scraped_at = ? WHERE url = ?", (desc, now, canonical_url))
+            conn.commit()
+            job["full_description"] = desc
+            console.print(f"  [yellow]! [STAGE 2][/yellow] Using discovery description fallback ({len(desc)} characters)")
+        else:
+            fallback = f"{job.get('title', 'Role')} at {job.get('site', 'Company')} - Location: {job.get('location', 'Remote')}"
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute("UPDATE jobs SET full_description = ?, detail_scraped_at = ? WHERE url = ?", (fallback, now, canonical_url))
+            conn.commit()
+            job["full_description"] = fallback
+            console.print(f"  [yellow]! [STAGE 2][/yellow] Using title/location metadata fallback")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Stage 3: AI Match Scoring (AI match score)
+    # ──────────────────────────────────────────────────────────────────────────
+    console.print(f"\n[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+    console.print(f"[bold cyan]▶ [STAGE 3: AI Match Scoring][/bold cyan] Evaluating candidate profile match with LLM...")
+    console.print(f"[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+
+    from applypilot.config import RESUME_PATH
+    if not RESUME_PATH.exists():
+        raise FileNotFoundError(f"Resume file not found at {RESUME_PATH}. Please provide a resume in profile first.")
+
+    resume_text = RESUME_PATH.read_text(encoding="utf-8")
+
+    if not force and job.get("fit_score") is not None:
+        score = job["fit_score"]
+        console.print(f"  [bold green]✓ [STAGE 3][/bold green] Using existing AI Match Score: [bold]{score}/10[/bold]")
+    else:
+        from applypilot.scoring.scorer import score_job
+        score_data = score_job(resume_text, job)
+        score = max(1, min(10, score_data.get("score", 0)))
+        keywords = score_data.get("keywords", "")
+        reasoning = score_data.get("reasoning", "")
+
+        now = datetime.now(timezone.utc).isoformat()
+        full_reasoning = f"{keywords}\n{reasoning}" if keywords else reasoning
+        conn.execute(
+            "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
+            (score, full_reasoning, now, canonical_url),
+        )
+        conn.commit()
+        job["fit_score"] = score
+        job["score_reasoning"] = full_reasoning
+        console.print(f"  [bold green]✓ [STAGE 3][/bold green] AI Match Score: [bold]{score}/10[/bold]")
+        if keywords:
+            console.print(f"  [dim]Keywords: {keywords[:80]}[/dim]")
+        if reasoning:
+            console.print(f"  [dim]Reasoning: {reasoning[:120]}[/dim]")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Stage 4: Resume Tailoring (Resume tailoring)
+    # ──────────────────────────────────────────────────────────────────────────
+    console.print(f"\n[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+    console.print(f"[bold cyan]▶ [STAGE 4: Resume Tailoring][/bold cyan] Crafting ATS-tailored resume & PDF...")
+    console.print(f"[bold cyan]════════════════════════════════════════════════════════════════[/bold cyan]")
+
+    from applypilot.config import TAILORED_DIR, load_profile
+    from applypilot.scoring.tailor import tailor_resume
+    from applypilot.scoring.pdf import convert_to_pdf
+
+    profile = load_profile()
+    TAILORED_DIR.mkdir(parents=True, exist_ok=True)
+
+    existing_path = job.get("tailored_resume_path")
+    is_custom = existing_path and "_custom" in str(existing_path).lower()
+
+    if (not force or is_custom) and existing_path and Path(existing_path).exists():
+        console.print(f"  [green]✓ [STAGE 4][/green] Preserving existing Tailored Resume: {Path(existing_path).name}")
+        txt_path = Path(existing_path)
+        try:
+            pdf_path = convert_to_pdf(txt_path)
+            console.print(f"  [green]✓ [STAGE 4][/green] PDF verified: {pdf_path.name}")
+        except Exception as e:
+            log.debug("PDF conversion for resume: %s", e)
+    else:
+        tailored_text, report = tailor_resume(
+            resume_text, job, profile, validation_mode=validation_mode
+        )
+
+        safe_title = re.sub(r"[^\w\s-]", "", job.get("title", "Role"))[:50].strip().replace(" ", "_")
+        safe_site = re.sub(r"[^\w\s-]", "", job.get("site", "Company"))[:20].strip().replace(" ", "_")
+        prefix = f"{safe_site}_{safe_title}"
+
+        txt_path = TAILORED_DIR / f"{prefix}.txt"
+        txt_path.write_text(tailored_text, encoding="utf-8")
+
+        job_path = TAILORED_DIR / f"{prefix}_JOB.txt"
+        job_desc = (
+            f"Title: {job.get('title')}\n"
+            f"Company: {job.get('site')}\n"
+            f"Location: {job.get('location', 'N/A')}\n"
+            f"Score: {job.get('fit_score', 'N/A')}\n"
+            f"URL: {canonical_url}\n\n"
+            f"{job.get('full_description', '')}"
+        )
+        job_path.write_text(job_desc, encoding="utf-8")
+
+        report_path = TAILORED_DIR / f"{prefix}_REPORT.json"
+        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+        pdf_path = None
+        try:
+            pdf_path = convert_to_pdf(txt_path)
+        except Exception as e:
+            log.warning("PDF conversion for %s: %s", txt_path, e)
+
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE jobs SET tailored_resume_path = ?, tailored_at = ?, tailor_attempts = COALESCE(tailor_attempts, 0) + 1 WHERE url = ?",
+            (str(txt_path), now, canonical_url),
+        )
+        conn.commit()
+        job["tailored_resume_path"] = str(txt_path)
+        job["tailored_at"] = now
+        console.print(f"  [bold green]✓ [STAGE 4][/bold green] Resume tailored successfully: [bold]{txt_path.name}[/bold]")
+        if pdf_path:
+            console.print(f"  [green]  PDF compiled: {pdf_path.name}[/green]")
+
+    console.print(f"\n[bold green]════════════════════════════════════════════════════════════════[/bold green]")
+    console.print(f"[bold green]✓ Stages 2 (Enrichment), 3 (AI Score), and 4 (Tailoring) Ready![/bold green]")
+    console.print(f"[bold cyan]Proceeding to Stage 5: Autonomous Apply...[/bold cyan]")
+    console.print(f"[bold green]════════════════════════════════════════════════════════════════[/bold green]\n")
+
+    return job

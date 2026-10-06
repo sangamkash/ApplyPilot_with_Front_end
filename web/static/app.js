@@ -4,6 +4,8 @@
   'use strict';
 
   // ── Global Application State ─────────────────────────────────────
+  const syncChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('applypilot_cross_tab_sync') : null;
+
   const state = {
     currentView: 'home', // 'home' | 'pipeline' | 'monitor'
     profile: 'golang',
@@ -37,6 +39,12 @@
     profileModalMode: 'create', // 'create' | 'edit'
     editingProfileId: null,
     editingProfileDetail: null,
+    jobsPage: 1,
+    jobsPageSize: 50,
+    jobsTotal: 0,
+    appliedPage: 1,
+    appliedPageSize: 50,
+    activeKpiFilter: null,
   };
 
   // ── DOM Element Cache ────────────────────────────────────────────
@@ -133,6 +141,10 @@
     kpiErrorsSub: document.getElementById('kpiErrorsSub'),
     kpiErrorCard: document.getElementById('kpiErrorCard'),
     scoreBarsContainer: document.getElementById('scoreBarsContainer'),
+    scoreFilterActiveBadge: document.getElementById('scoreFilterActiveBadge'),
+    activeScoreValue: document.getElementById('activeScoreValue'),
+    btnClearScoreFilter: document.getElementById('btnClearScoreFilter'),
+    scoreDistHint: document.getElementById('scoreDistHint'),
     sourcesList: document.getElementById('sourcesList'),
     totalSitesCount: document.getElementById('totalSitesCount'),
     tabBtns: document.querySelectorAll('.main-tabs .tab-btn'),
@@ -141,11 +153,14 @@
     tabErrorsCount: document.getElementById('tabErrorsCount'),
     tabAllJobsCount: document.getElementById('tabAllJobsCount'),
     tabBtnErrors: document.getElementById('tabBtnErrors'),
+    appliedPagination: document.getElementById('appliedPagination'),
+    jobsPagination: document.getElementById('jobsPagination'),
     appliedJobsTableBody: document.getElementById('appliedJobsTableBody'),
     appliedSearchInput: document.getElementById('appliedSearchInput'),
     filterAppliedStageSelect: document.getElementById('filterAppliedStageSelect'),
     filterAppliedSiteSelect: document.getElementById('filterAppliedSiteSelect'),
     filterAppliedMinScoreSelect: document.getElementById('filterAppliedMinScoreSelect'),
+    btnResetAppliedFilters: document.getElementById('btnResetAppliedFilters'),
     selectAllAppliedCheckbox: document.getElementById('selectAllAppliedCheckbox'),
     headerAppliedBulkActions: document.getElementById('headerAppliedBulkActions'),
     btnHeaderAppliedAutoApply: document.getElementById('btnHeaderAppliedAutoApply'),
@@ -166,6 +181,7 @@
     filterStageSelect: document.getElementById('filterStageSelect'),
     filterSiteSelect: document.getElementById('filterSiteSelect'),
     filterMinScoreSelect: document.getElementById('filterMinScoreSelect'),
+    btnResetAllFilters: document.getElementById('btnResetAllFilters'),
     selectAllJobsCheckbox: document.getElementById('selectAllJobsCheckbox'),
     headerBulkActions: document.getElementById('headerBulkActions'),
     btnHeaderAutoApply: document.getElementById('btnHeaderAutoApply'),
@@ -310,6 +326,25 @@
     }
   }
 
+  // ── Local Task State Cache ───────────────────────────────────────
+  function loadCachedTasks() {
+    try {
+      const cached = localStorage.getItem(`applypilot_auto_tasks_${state.profile}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          state.autoApplyTasks = { ...parsed, ...state.autoApplyTasks };
+        }
+      }
+    } catch (_) {}
+  }
+
+  function saveCachedTasks() {
+    try {
+      localStorage.setItem(`applypilot_auto_tasks_${state.profile}`, JSON.stringify(state.autoApplyTasks));
+    } catch (_) {}
+  }
+
   // ── View Switching & Client-Side Routing ─────────────────────────
   function switchView(viewName) {
     if (!['home', 'pipeline', 'monitor'].includes(viewName)) {
@@ -362,8 +397,11 @@
 
     state.profilesList = data.profiles;
 
-    // Ensure valid active profile
-    if (!state.profilesList.some((p) => p.id === state.profile)) {
+    // Restore saved profile if exists
+    const savedProf = localStorage.getItem('applypilot_active_profile');
+    if (savedProf && state.profilesList.some((p) => p.id === savedProf)) {
+      state.profile = savedProf;
+    } else if (!state.profilesList.some((p) => p.id === state.profile)) {
       state.profile = data.current || state.profilesList[0]?.id || 'golang';
     }
 
@@ -512,17 +550,22 @@
     });
   }
 
-  function setActiveProfile(profileId) {
+  async function setActiveProfile(profileId) {
     if (!profileId) return;
     state.profile = profileId;
+    localStorage.setItem('applypilot_active_profile', profileId);
     el.globalProfileSelect.value = profileId;
+
+    state.autoApplyTasks = {};
+    loadCachedTasks();
+    await pollApplyStatus(false);
 
     renderSpotlightCard();
     renderProfilesGrid(state.profilesList);
     updatePipelineViewHeader();
 
     // Trigger data refresh for new profile
-    refreshData();
+    await refreshData();
     checkPipelineStatus();
     showToast(`Switched active profile to: ${profileId}`, 'info');
   }
@@ -981,6 +1024,7 @@ Bachelor of Science in Computer Science`;
   }
 
   // ── Core Monitor Refresh Cycle ───────────────────────────────────
+  // ── Core Monitor Refresh Cycle ───────────────────────────────────
   async function refreshData() {
     try {
       const [statsData, liveData] = await Promise.all([
@@ -991,7 +1035,12 @@ Bachelor of Science in Computer Science`;
       if (statsData) {
         state.stats = statsData;
         renderKPIs(statsData);
-        renderScoreDistribution(statsData.score_distribution);
+        // Only render global score distribution if we are on tab-all-jobs AND no filter is active
+        if (state.currentTab === 'tab-all-jobs' && state.selectedScoreFilter === null && state.minScoreFilter === '' && state.siteFilter === 'all' && state.stageFilter === 'all' && !state.searchKeyword) {
+          renderScoreDistribution(statsData.score_distribution);
+        } else if (state.currentTab === 'tab-applied') {
+          updateAppliedScoreDistribution();
+        }
         renderSources(statsData.sites);
         updateSiteSelect(statsData.sites);
         updatePipelineNodeStats(statsData);
@@ -1004,7 +1053,12 @@ Bachelor of Science in Computer Science`;
         renderLiveFeed(liveData);
       }
 
-      await fetchJobsData();
+      // Check if any auto-apply tasks are actively running
+      const hasActiveApply = Object.values(state.autoApplyTasks).some((t) => t.status === 'in_progress');
+      // If auto apply is actively running, avoid recreating table DOM on every 2s refresh tick to prevent layout shifts/scroll jumping
+      if (!hasActiveApply) {
+        await fetchJobsData();
+      }
     } catch (err) {
       console.warn('Error during data refresh:', err);
     }
@@ -1080,10 +1134,34 @@ Bachelor of Science in Computer Science`;
       .join('');
   }
 
+  function updateScoreBadge() {
+    if (!el.scoreFilterActiveBadge) return;
+    if (state.selectedScoreFilter !== null) {
+      el.scoreFilterActiveBadge.classList.remove('hidden');
+      if (el.activeScoreValue) el.activeScoreValue.textContent = `${state.selectedScoreFilter} / 10`;
+    } else {
+      el.scoreFilterActiveBadge.classList.add('hidden');
+    }
+  }
+
+  function clearScoreFilter() {
+    state.selectedScoreFilter = null;
+    updateScoreBadge();
+    if (state.currentTab === 'tab-applied') {
+      state.appliedPage = 1;
+      renderAppliedJobsTable();
+      updateAppliedScoreDistribution();
+    } else {
+      state.jobsPage = 1;
+      fetchJobsData();
+    }
+  }
+
   function renderScoreDistribution(dist) {
     if (!el.scoreBarsContainer) return;
-    if (!dist || Object.keys(dist).length === 0) {
-      el.scoreBarsContainer.innerHTML = '<div class="empty-state">No scored jobs yet</div>';
+    if (!dist || Object.keys(dist).length === 0 || Object.values(dist).every((v) => v === 0)) {
+      el.scoreBarsContainer.innerHTML = '<div class="empty-state" style="text-align: center; padding: 24px; color: var(--text-dim);">No scored jobs matching filters</div>';
+      updateScoreBadge();
       return;
     }
 
@@ -1091,29 +1169,98 @@ Bachelor of Science in Computer Science`;
     let html = '';
     for (let s = 10; s >= 0; s--) {
       const count = dist[s] || 0;
-      const pct = Math.round((count / maxCount) * 100);
+      const pct = count > 0 ? Math.max(Math.round((count / maxCount) * 100), 4) : 0;
       const isSelected = state.selectedScoreFilter === s;
-      const scoreClass = s >= 8 ? 'high' : s >= 6 ? 'mid' : 'low';
+      const isDimmed = state.selectedScoreFilter !== null && !isSelected;
 
       html += `
-        <div class="score-bar-col ${isSelected ? 'selected' : ''}" data-score="${s}" title="Score ${s}: ${count} jobs">
-          <span class="bar-count">${count}</span>
+        <div class="score-bar-row ${isSelected ? 'selected' : ''} ${isDimmed ? 'dimmed' : ''}" data-score="${s}" title="Score ${s}: ${count} job(s) (click to filter)">
+          <span class="score-bar-pill score-${s}">${s}</span>
           <div class="bar-track">
-            <div class="bar-fill score-${scoreClass}" style="height: ${pct}%;"></div>
+            <div class="bar-fill score-${s}" style="width: ${pct}%;"></div>
           </div>
-          <span class="bar-label">${s}</span>
+          <span class="score-count">${count}</span>
         </div>
       `;
     }
     el.scoreBarsContainer.innerHTML = html;
+    updateScoreBadge();
 
-    el.scoreBarsContainer.querySelectorAll('.score-bar-col').forEach((col) => {
-      col.addEventListener('click', () => {
-        const score = parseInt(col.getAttribute('data-score'), 10);
+    el.scoreBarsContainer.querySelectorAll('.score-bar-row').forEach((row) => {
+      row.addEventListener('click', () => {
+        const score = parseInt(row.getAttribute('data-score'), 10);
         state.selectedScoreFilter = state.selectedScoreFilter === score ? null : score;
-        fetchJobsData();
+        if (state.selectedScoreFilter !== null) {
+          if (el.filterMinScoreSelect) {
+            el.filterMinScoreSelect.value = '';
+            state.minScoreFilter = '';
+          }
+          if (el.filterAppliedMinScoreSelect) {
+            el.filterAppliedMinScoreSelect.value = '';
+            state.appliedMinScoreFilter = '';
+          }
+        }
+        updateScoreBadge();
+        if (state.currentTab === 'tab-applied') {
+          state.appliedPage = 1;
+          renderAppliedJobsTable();
+        } else {
+          state.jobsPage = 1;
+          fetchJobsData();
+        }
       });
     });
+  }
+
+  function matchesScoreFilter(score, filterVal) {
+    if (!filterVal) return true;
+    if (score == null) return false;
+    const s = Math.round(score);
+    if (filterVal.includes('-')) {
+      const parts = filterVal.split('-');
+      const minS = parseInt(parts[0], 10);
+      const maxS = parseInt(parts[1], 10);
+      return s >= minS && s <= maxS;
+    }
+    if (filterVal.endsWith('+')) {
+      const minS = parseInt(filterVal.slice(0, -1), 10);
+      return s >= minS;
+    }
+    const minS = parseInt(filterVal, 10);
+    return isNaN(minS) ? true : s >= minS;
+  }
+
+  function updateAppliedScoreDistribution() {
+    if (!el.scoreBarsContainer) return;
+    const allApplied = state.appliedJobs || [];
+    const dist = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0 };
+    let hasScored = false;
+    allApplied.forEach((j) => {
+      // 1. Site filter
+      if (state.appliedSiteFilter && state.appliedSiteFilter !== 'all' && j.site !== state.appliedSiteFilter) return;
+      // 2. Stage filter
+      const task = state.autoApplyTasks[j.url];
+      const dbInProgress = j.apply_status === 'in_progress' || j.apply_status === 'applying' || j.apply_status === 'starting' || j.apply_status === 'pending';
+      const isTaskActive = (!!task && task.status === 'in_progress') || dbInProgress;
+      const isApplied = !isTaskActive && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed'));
+      const hasResume = !!j.tailored_resume_path || !!j.tailored_filename;
+      if (state.appliedStageFilter === 'applied' && !isApplied) return;
+      if (state.appliedStageFilter === 'with_resume' && !hasResume) return;
+      if (state.appliedStageFilter === 'in_progress' && !isTaskActive) return;
+      if (state.appliedStageFilter === 'errors' && !j.apply_error && !j.detail_error) return;
+      // 3. Search keyword
+      if (state.appliedSearchKeyword) {
+        const kw = state.appliedSearchKeyword.toLowerCase();
+        const m = (j.title || '').toLowerCase().includes(kw) || (j.company || '').toLowerCase().includes(kw) || (j.site || '').toLowerCase().includes(kw) || (j.location || '').toLowerCase().includes(kw) || (j.score_reasoning || '').toLowerCase().includes(kw);
+        if (!m) return;
+      }
+      if (j.fit_score != null) {
+        const s = Math.min(10, Math.max(0, Math.round(j.fit_score)));
+        dist[s] = (dist[s] || 0) + 1;
+        hasScored = true;
+      }
+    });
+    renderScoreDistribution(hasScored ? dist : {});
   }
 
   function renderSources(sites) {
@@ -1126,35 +1273,67 @@ Bachelor of Science in Computer Science`;
     el.totalSitesCount.textContent = `${sites.length} sites`;
     el.sourcesList.innerHTML = sites
       .map(
-        (s) => `
-        <div class="source-item">
-          <div class="source-name">
-            <span class="site-tag">${escapeHTML(s.site)}</span>
-            <span class="source-applied">${s.applied} applied</span>
+        (s) => {
+          const isSelected = state.siteFilter === s.site || state.appliedSiteFilter === s.site;
+          return `
+          <div class="source-item ${isSelected ? 'selected' : ''}" data-site="${escapeHTML(s.site || '')}" title="Click to filter by ${escapeHTML(s.site || 'portal')}">
+            <div class="source-name">
+              <span class="site-tag">${escapeHTML(s.site)}</span>
+              <span class="source-applied" style="margin-left: 8px;">${s.applied} applied</span>
+            </div>
+            <div class="source-meta">
+              <span>${s.total} found</span>
+              <span class="text-cyan" style="margin-left: 6px;">${s.high_fit} high fit</span>
+            </div>
           </div>
-          <div class="source-meta">
-            <span>${s.total} found</span>
-            <span class="text-cyan">${s.high_fit} high fit</span>
-          </div>
-        </div>
-      `
+        `;
+        }
       )
       .join('');
+
+    el.sourcesList.querySelectorAll('.source-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        const site = item.getAttribute('data-site');
+        if (site) {
+          const newFilter = (state.siteFilter === site || state.appliedSiteFilter === site) ? 'all' : site;
+          state.siteFilter = newFilter;
+          state.appliedSiteFilter = newFilter;
+          if (el.filterSiteSelect) el.filterSiteSelect.value = newFilter;
+          if (el.filterAppliedSiteSelect) el.filterAppliedSiteSelect.value = newFilter;
+          renderSources(state.stats?.sites);
+          if (state.currentTab === 'tab-applied') {
+            state.appliedPage = 1;
+            renderAppliedJobsTable();
+            updateAppliedScoreDistribution();
+          } else {
+            state.jobsPage = 1;
+            fetchJobsData();
+          }
+        }
+      });
+    });
   }
 
   function updateSiteSelect(sites) {
     if (!el.filterSiteSelect) return;
-    const current = el.filterSiteSelect.value;
+    const current = el.filterSiteSelect.value || state.siteFilter || 'all';
     let opts = '<option value="all">All Sites / Sources</option>';
     if (sites) {
       sites.forEach((s) => {
         opts += `<option value="${escapeHTML(s.site)}" ${current === s.site ? 'selected' : ''}>${escapeHTML(s.site)} (${s.total})</option>`;
       });
     }
-    el.filterSiteSelect.innerHTML = opts;
+
+    if (el.filterSiteSelect.innerHTML !== opts) {
+      el.filterSiteSelect.innerHTML = opts;
+    }
+    if (current) el.filterSiteSelect.value = current;
+
     if (el.filterAppliedSiteSelect) {
-      const appCurrent = el.filterAppliedSiteSelect.value;
-      el.filterAppliedSiteSelect.innerHTML = opts;
+      const appCurrent = el.filterAppliedSiteSelect.value || state.appliedSiteFilter || 'all';
+      if (el.filterAppliedSiteSelect.innerHTML !== opts) {
+        el.filterAppliedSiteSelect.innerHTML = opts;
+      }
       if (appCurrent) el.filterAppliedSiteSelect.value = appCurrent;
     }
   }
@@ -1212,47 +1391,75 @@ Bachelor of Science in Computer Science`;
 
   // ── Fetch & Render Jobs (Applied, All, and Errors) ────────────────
   async function fetchJobsData() {
+    const limit = state.jobsPageSize;
+    const offset = (state.jobsPage - 1) * state.jobsPageSize;
     const params = {
-      limit: 100,
+      limit: limit,
+      offset: offset,
       search: state.searchKeyword,
       site: state.siteFilter,
-      min_score: state.selectedScoreFilter != null ? state.selectedScoreFilter : state.minScoreFilter,
+      min_score: state.selectedScoreFilter != null ? '' : state.minScoreFilter,
+      exact_score: state.selectedScoreFilter != null ? state.selectedScoreFilter : '',
     };
 
-    // 1. Fetch all jobs
+    // 1. Fetch all jobs with current filter params
     const allData = await fetchAPI('jobs', { ...params, stage: state.stageFilter });
     if (allData && allData.jobs) {
       state.allJobs = allData.jobs;
-      el.tabAllJobsCount.textContent = allData.total || 0;
+      state.jobsTotal = allData.total || allData.jobs.length;
+      if (el.tabAllJobsCount) el.tabAllJobsCount.textContent = state.jobsTotal;
       renderJobsTable(allData.jobs);
+      renderJobsPagination();
+
+      // Dynamically update FIT Score Distribution to match filtered dataset when on tab-all-jobs
+      if (state.currentTab === 'tab-all-jobs' && allData.score_distribution) {
+        renderScoreDistribution(allData.score_distribution);
+      }
     }
 
-    // 2. Fetch applied jobs (strictly already applied jobs)
-    const appliedData = await fetchAPI('jobs', { stage: 'applied', limit: 200 });
+    // 2. Fetch applied and tailored jobs (inclusive of all in-progress, applied, and tailored jobs)
+    const appliedData = await fetchAPI('jobs', { stage: 'applied_tailored', limit: 1000 });
     if (appliedData && appliedData.jobs) {
-      state.appliedJobs = appliedData.jobs;
-      el.tabAppliedCount.textContent = appliedData.total || appliedData.jobs.length;
+      const appliedMap = new Map();
+      appliedData.jobs.forEach((j) => appliedMap.set(j.url, j));
+      for (const [url, task] of Object.entries(state.autoApplyTasks)) {
+        if (!appliedMap.has(url)) {
+          const fromAll = state.allJobs.find((j) => j.url === url);
+          if (fromAll) {
+            appliedMap.set(url, { ...fromAll, apply_status: task.status });
+          }
+        }
+      }
+      state.appliedJobs = Array.from(appliedMap.values());
       renderAppliedJobsTable();
+      if (state.currentTab === 'tab-applied') {
+        updateAppliedScoreDistribution();
+      }
     }
 
     // 3. Fetch error jobs for dedicated error diagnostics tab
-    const errorData = await fetchAPI('jobs', { stage: 'errors', limit: 100 });
+    const errorData = await fetchAPI('jobs', { stage: 'errors', limit: 200 });
     if (errorData && errorData.jobs) {
       state.errorJobs = errorData.jobs;
       renderErrorsTable(errorData.jobs);
     }
   }
 
-  // ── Render Applied Jobs Table View (Only Already Applied Jobs) ────
+  // ── Render Applied Jobs Table View (Applied, Tailored & In-Progress) ────
   function renderAppliedJobsTable() {
     if (!el.appliedJobsTableBody) return;
     const allApplied = state.appliedJobs || [];
 
-    // Strictly ensure only already applied jobs (or currently active re-apply tasks) are shown
     const filtered = allApplied.filter((j) => {
-      const isTaskActive = !!state.autoApplyTasks[j.url];
-      const isApplied = !!j.applied_at || !!j.apply_status || (state.autoApplyTasks[j.url]?.status === 'completed');
-      if (!isApplied && !isTaskActive) return false;
+      const task = state.autoApplyTasks[j.url];
+      const dbInProgress = j.apply_status === 'in_progress' || j.apply_status === 'applying' || j.apply_status === 'starting' || j.apply_status === 'pending';
+      const isTaskActive = (!!task && task.status === 'in_progress') || dbInProgress;
+      const isApplied = !isTaskActive && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed'));
+      const hasResume = !!j.tailored_resume_path || !!j.tailored_filename;
+      const isInProgress = isTaskActive;
+
+      // Base: Must be applied, tailored, or currently in progress
+      if (!isApplied && !hasResume && !isInProgress) return false;
 
       // 1. Search keyword
       if (state.appliedSearchKeyword) {
@@ -1268,8 +1475,12 @@ Bachelor of Science in Computer Science`;
       }
 
       // 2. Stage / Status filter
-      if (state.appliedStageFilter === 'with_resume') {
-        if (!j.tailored_resume_path && !j.tailored_filename) return false;
+      if (state.appliedStageFilter === 'applied') {
+        if (!isApplied) return false;
+      } else if (state.appliedStageFilter === 'with_resume') {
+        if (!hasResume) return false;
+      } else if (state.appliedStageFilter === 'in_progress') {
+        if (!isInProgress) return false;
       } else if (state.appliedStageFilter === 'errors') {
         if (!j.apply_error && !j.detail_error) return false;
       }
@@ -1279,31 +1490,60 @@ Bachelor of Science in Computer Science`;
         if (j.site !== state.appliedSiteFilter) return false;
       }
 
-      // 4. Min Fit Score filter
-      if (state.appliedMinScoreFilter) {
-        const minS = parseInt(state.appliedMinScoreFilter, 10);
-        if (isNaN(minS) || (j.fit_score || 0) < minS) return false;
+      // 4. Fit Score filter (exact or min/range)
+      if (state.selectedScoreFilter !== null) {
+        if (Math.round(j.fit_score || 0) !== state.selectedScoreFilter) return false;
+      } else if (state.appliedMinScoreFilter) {
+        if (!matchesScoreFilter(j.fit_score, state.appliedMinScoreFilter)) return false;
       }
 
       return true;
     });
+
+    if (el.tabAppliedCount) {
+      el.tabAppliedCount.textContent = filtered.length;
+    }
+
+    const pageSize = state.appliedPageSize;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    if (state.appliedPage > totalPages) state.appliedPage = 1;
+    const startIdx = (state.appliedPage - 1) * pageSize;
+    const pageItems = filtered.slice(startIdx, startIdx + pageSize);
+
+    const wrapper = el.appliedJobsTableBody.closest('.jobs-table-wrapper');
+    const prevScrollTop = wrapper ? wrapper.scrollTop : 0;
+    const prevScrollY = window.scrollY;
 
     if (filtered.length === 0) {
       el.appliedJobsTableBody.innerHTML = `
         <tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--text-dim);">
           No applied or tailored jobs found matching your filters.
         </td></tr>`;
+      renderAppliedPagination(0);
+      if (wrapper) wrapper.scrollTop = prevScrollTop;
+      window.scrollTo({ top: prevScrollY, behavior: 'instant' });
       updateAppliedBulkActionBar();
       return;
     }
 
-    el.appliedJobsTableBody.innerHTML = filtered
+    el.appliedJobsTableBody.innerHTML = pageItems
       .map((j) => {
         const isChecked = state.selectedJobUrls.has(j.url);
-        const task = state.autoApplyTasks[j.url];
-        const isTaskRunning = task && task.status === 'in_progress';
-        const isTaskComplete = task && task.status === 'completed';
-        const isApplied = !!j.applied_at || isTaskComplete;
+        const dbInProgress = j.apply_status === 'in_progress' || j.apply_status === 'applying' || j.apply_status === 'starting' || j.apply_status === 'pending';
+        let task = state.autoApplyTasks[j.url];
+        if (!task && dbInProgress) {
+          task = {
+            url: j.url,
+            status: 'in_progress',
+            percent: 30,
+            step_index: 2,
+            current_step: 'Autonomous Apply in-progress...',
+            remaining_steps: ['AI Match Scoring', 'Resume Tailoring', 'Autonomous Apply', 'Submission']
+          };
+        }
+        const isTaskRunning = (!!task && task.status === 'in_progress') || dbInProgress;
+        const isTaskComplete = !isTaskRunning && !dbInProgress && !!task && task.status === 'completed';
+        const isApplied = !isTaskRunning && !dbInProgress && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed') || isTaskComplete);
         const hasError = !!j.apply_error;
         const hasResume = !!j.tailored_filename || !!j.tailored_resume_path;
         const filename = j.tailored_filename || (j.tailored_resume_path ? j.tailored_resume_path.split('/').pop() : '');
@@ -1350,20 +1590,20 @@ Bachelor of Science in Computer Science`;
                   <div class="milestone-top-line">
                     <span class="milestone-live-step">
                       <span class="pulse-indicator"></span>
-                      ${escapeHTML(task.current_step || 'Auto Applying...')}
+                      ${escapeHTML(task?.current_step || 'Auto Applying...')}
                     </span>
-                    <span class="milestone-pct-tag">${task.percent || 15}%</span>
+                    <span class="milestone-pct-tag">${task?.percent || 15}%</span>
                   </div>
                   <div class="milestone-stepper-bar">
-                    <div class="milestone-step-dot ${task.step_index >= 1 ? (task.step_index === 1 ? 'active' : 'done') : ''}" title="Step 1: Form Detection"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 2 ? (task.step_index === 2 ? 'active' : 'done') : ''}" title="Step 2: Applicant Data"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 3 ? (task.step_index === 3 ? 'active' : 'done') : ''}" title="Step 3: Resume Attachment"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 4 ? (task.step_index === 4 ? 'active' : 'done') : ''}" title="Step 4: AI Screening Q&A"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 5 ? 'done' : ''}" title="Step 5: Submission & Verification"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 1 ? (task?.step_index === 1 ? 'active' : 'done') : ''}" title="Stage 2: Detail Enrichment"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 2 ? (task?.step_index === 2 ? 'active' : 'done') : ''}" title="Stage 3: AI Match Scoring"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 3 ? (task?.step_index === 3 ? 'active' : 'done') : ''}" title="Stage 4: Resume Tailoring"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 4 ? (task?.step_index === 4 ? 'active' : 'done') : ''}" title="Stage 5: Autonomous Apply"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 5 ? 'done' : ''}" title="Submission & Verification"></div>
                   </div>
                   <div class="milestone-bottom-line">
-                    <span class="text-xs text-dim">Step ${task.step_index || 1}/5</span>
-                    <span class="text-xs text-dim-alt">${task.remaining_steps ? task.remaining_steps.length : 0} steps left</span>
+                    <span class="text-xs text-dim">Step ${task?.step_index || 1}/5</span>
+                    <span class="text-xs text-dim-alt">${task?.remaining_steps ? task.remaining_steps.length : 0} steps left</span>
                   </div>
                 </div>
               ` : isApplied ? `
@@ -1403,6 +1643,11 @@ Bachelor of Science in Computer Science`;
       })
       .join('');
 
+    renderAppliedPagination(filtered.length);
+
+    if (wrapper) wrapper.scrollTop = prevScrollTop;
+    window.scrollTo({ top: prevScrollY, behavior: 'instant' });
+
     // Row selection checkboxes in Applied Table
     el.appliedJobsTableBody.querySelectorAll('tr').forEach((row) => {
       const cb = row.querySelector('.applied-row-select');
@@ -1439,27 +1684,35 @@ Bachelor of Science in Computer Science`;
     el.appliedJobsTableBody.querySelectorAll('.btn-view-job').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         openJobModal(btn.getAttribute('data-url'));
       });
     });
 
     // View ATS Resume
     el.appliedJobsTableBody.querySelectorAll('.btn-view-resume').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         openResumeModal(btn.getAttribute('data-file'), btn.getAttribute('data-url'), false);
       });
     });
 
     // Replace / Attach custom ATS resume
     el.appliedJobsTableBody.querySelectorAll('.btn-open-custom-replace, .btn-open-custom-attach').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         openResumeModal(btn.getAttribute('data-file') || '', btn.getAttribute('data-url'), true);
       });
     });
 
     // Single Row Re-apply / Auto Apply
     el.appliedJobsTableBody.querySelectorAll('.btn-row-reapply, .btn-row-start-apply').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        btn.blur();
         const url = btn.getAttribute('data-url');
         if (url) triggerAutoApplyJobs([url]);
       });
@@ -1561,6 +1814,7 @@ Bachelor of Science in Computer Science`;
   }
 
   // ── Multi-Select & Bulk Action Bar ──────────────────────────────
+  // ── Multi-Select & Bulk Action Bar ──────────────────────────────
   function updateBulkActionBar() {
     const selectedCount = state.selectedJobUrls.size;
     if (el.bulkSelectedCount) el.bulkSelectedCount.textContent = selectedCount;
@@ -1604,11 +1858,116 @@ Bachelor of Science in Computer Science`;
     }
   }
 
+  // ── Pagination Controls ──────────────────────────────────────────
+  function renderJobsPagination() {
+    if (!el.jobsPagination) return;
+    const total = state.jobsTotal || 0;
+    const pageSize = state.jobsPageSize;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (state.jobsPage > totalPages) state.jobsPage = 1;
+    const currentPage = state.jobsPage;
+
+    const startIdx = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const endIdx = Math.min(currentPage * pageSize, total);
+
+    el.jobsPagination.innerHTML = `
+      <div class="pagination-info">
+        <span>Showing <strong>${startIdx} - ${endIdx}</strong> of <strong>${total}</strong> jobs</span>
+        <label style="display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;">
+          <span>Per page:</span>
+          <select class="pagination-size-select" id="jobsPageSizeSelect">
+            <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
+            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+          </select>
+        </label>
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="pagination-btn" id="btnJobsPrevPage" ${currentPage <= 1 ? 'disabled' : ''}>&larr; Prev</button>
+        <span style="padding: 0 8px; font-weight: 500;">Page ${currentPage} of ${totalPages}</span>
+        <button type="button" class="pagination-btn" id="btnJobsNextPage" ${currentPage >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+      </div>
+    `;
+
+    document.getElementById('jobsPageSizeSelect')?.addEventListener('change', (e) => {
+      state.jobsPageSize = parseInt(e.target.value, 10);
+      state.jobsPage = 1;
+      fetchJobsData();
+    });
+    document.getElementById('btnJobsPrevPage')?.addEventListener('click', () => {
+      if (state.jobsPage > 1) {
+        state.jobsPage--;
+        fetchJobsData();
+      }
+    });
+    document.getElementById('btnJobsNextPage')?.addEventListener('click', () => {
+      if (state.jobsPage < totalPages) {
+        state.jobsPage++;
+        fetchJobsData();
+      }
+    });
+  }
+
+  function renderAppliedPagination(total) {
+    if (!el.appliedPagination) return;
+    const pageSize = state.appliedPageSize;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    if (state.appliedPage > totalPages) state.appliedPage = 1;
+    const currentPage = state.appliedPage;
+
+    const startIdx = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const endIdx = Math.min(currentPage * pageSize, total);
+
+    el.appliedPagination.innerHTML = `
+      <div class="pagination-info">
+        <span>Showing <strong>${startIdx} - ${endIdx}</strong> of <strong>${total}</strong> applied/tailored jobs</span>
+        <label style="display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;">
+          <span>Per page:</span>
+          <select class="pagination-size-select" id="appliedPageSizeSelect">
+            <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
+            <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+            <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+          </select>
+        </label>
+      </div>
+      <div class="pagination-controls">
+        <button type="button" class="pagination-btn" id="btnAppliedPrevPage" ${currentPage <= 1 ? 'disabled' : ''}>&larr; Prev</button>
+        <span style="padding: 0 8px; font-weight: 500;">Page ${currentPage} of ${totalPages}</span>
+        <button type="button" class="pagination-btn" id="btnAppliedNextPage" ${currentPage >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+      </div>
+    `;
+
+    document.getElementById('appliedPageSizeSelect')?.addEventListener('change', (e) => {
+      state.appliedPageSize = parseInt(e.target.value, 10);
+      state.appliedPage = 1;
+      renderAppliedJobsTable();
+    });
+    document.getElementById('btnAppliedPrevPage')?.addEventListener('click', () => {
+      if (state.appliedPage > 1) {
+        state.appliedPage--;
+        renderAppliedJobsTable();
+      }
+    });
+    document.getElementById('btnAppliedNextPage')?.addEventListener('click', () => {
+      if (state.appliedPage < totalPages) {
+        state.appliedPage++;
+        renderAppliedJobsTable();
+      }
+    });
+  }
+
   // ── Auto-Apply Milestone Orchestrator (Frontend) ─────────────────
   async function triggerAutoApplyJobs(urls) {
     if (!urls || urls.length === 0) return;
 
-    // Optimistically set running tasks in state
+    // Preserve scroll positions
+    const prevWindowY = window.scrollY;
+    const allTableWrapper = el.jobsTableBody?.closest('.jobs-table-wrapper');
+    const appliedTableWrapper = el.appliedJobsTableBody?.closest('.jobs-table-wrapper');
+    const prevAllScroll = allTableWrapper ? allTableWrapper.scrollTop : 0;
+    const prevAppliedScroll = appliedTableWrapper ? appliedTableWrapper.scrollTop : 0;
+
+    // Optimistically set running tasks in state and update DOM rows in-place
     urls.forEach((u) => {
       state.autoApplyTasks[u] = {
         url: u,
@@ -1616,21 +1975,29 @@ Bachelor of Science in Computer Science`;
         percent: 15,
         step_index: 1,
         total_steps: 5,
-        current_step: 'Form Detection & Navigation',
+        current_step: 'Stage 2: Detail Enrichment (Scraping requirements)...',
         completed_steps: [],
-        remaining_steps: ['Applicant Data', 'Resume Attachment', 'AI Screening', 'Submission'],
+        remaining_steps: ['Stage 3: AI Match Scoring', 'Stage 4: Resume Tailoring', 'Stage 5: Autonomous Apply', 'Submission'],
       };
+      // Smoothly update the live row widget directly without blowing away the table DOM
+      updateRowMilestoneDOM(u, state.autoApplyTasks[u]);
     });
 
-    // Re-render table rows to immediately display milestone bars
-    if (state.allJobs && state.allJobs.length > 0) {
-      renderJobsTable(state.allJobs);
-    }
-    if (state.appliedJobs && state.appliedJobs.length > 0) {
-      renderAppliedJobsTable();
+    saveCachedTasks();
+
+    // Notify other tabs immediately via BroadcastChannel
+    if (syncChannel) {
+      try {
+        syncChannel.postMessage({ type: 'AUTO_APPLY_TASK_UPDATE', urls: urls });
+      } catch (_) {}
     }
 
     showToast(`⚡ Autonomous apply started for ${urls.length} job(s)...`, 'info');
+
+    // Restore scroll in case any layout shift attempted
+    if (allTableWrapper) allTableWrapper.scrollTop = prevAllScroll;
+    if (appliedTableWrapper) appliedTableWrapper.scrollTop = prevAppliedScroll;
+    window.scrollTo({ top: prevWindowY, behavior: 'instant' });
 
     try {
       await fetch('/api/jobs/apply', {
@@ -1648,37 +2015,57 @@ Bachelor of Science in Computer Science`;
     }
   }
 
-  function startApplyStatusPolling() {
-    if (state.autoApplyTimer) return;
-    state.autoApplyTimer = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs/apply-status?profile=${state.profile}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const tasks = data.tasks || {};
-        state.autoApplyTasks = { ...state.autoApplyTasks, ...tasks };
+  async function pollApplyStatus(shouldUpdateDOM = true) {
+    try {
+      const res = await fetch(`/api/jobs/apply-status?profile=${state.profile}`);
+      if (!res.ok) return false;
+      const data = await res.json();
+      const tasks = data.tasks || {};
 
-        let hasActiveTasks = false;
-        for (const [url, task] of Object.entries(tasks)) {
-          if (task.status === 'in_progress') {
-            hasActiveTasks = true;
-          }
-          // Update live DOM widget directly for silky-smooth animation without full re-render
+      const prevActiveCount = Object.values(state.autoApplyTasks).filter((t) => t.status === 'in_progress').length;
+      state.autoApplyTasks = { ...state.autoApplyTasks, ...tasks };
+      saveCachedTasks();
+
+      let hasActiveTasks = false;
+      for (const [url, task] of Object.entries(tasks)) {
+        if (task.status === 'in_progress') {
+          hasActiveTasks = true;
+        }
+        if (shouldUpdateDOM) {
           updateRowMilestoneDOM(url, task);
         }
-
-        // If no active tasks remain, stop polling and refresh full datasets
-        if (!hasActiveTasks && Object.keys(tasks).length > 0) {
-          clearInterval(state.autoApplyTimer);
-          state.autoApplyTimer = null;
-          showToast('🎉 Autonomous application cycle completed!', 'success');
-          await fetchJobsData();
-          await checkPipelineStatus();
-        }
-      } catch (e) {
-        console.error('Error polling apply status:', e);
       }
-    }, 800);
+
+      // If active tasks just finished
+      const curActiveCount = Object.values(tasks).filter((t) => t.status === 'in_progress').length;
+      if (prevActiveCount > 0 && curActiveCount === 0) {
+        showToast('🎉 Autonomous application cycle completed!', 'success');
+        await fetchJobsData();
+        await checkPipelineStatus();
+      }
+
+      return hasActiveTasks;
+    } catch (e) {
+      console.warn('Error polling apply status:', e);
+      return false;
+    }
+  }
+
+  function startApplyStatusPolling() {
+    if (state.autoApplyTimer) {
+      clearTimeout(state.autoApplyTimer);
+      clearInterval(state.autoApplyTimer);
+      state.autoApplyTimer = null;
+    }
+
+    // Dynamic poller: fast (800ms) when active tasks exist, steady (2000ms) when idle
+    const runPoll = async () => {
+      const hasActive = await pollApplyStatus(true);
+      const nextInterval = hasActive ? 800 : 2000;
+      state.autoApplyTimer = setTimeout(runPoll, nextInterval);
+    };
+
+    runPoll();
   }
 
   function updateRowMilestoneDOM(url, task) {
@@ -1709,11 +2096,11 @@ Bachelor of Science in Computer Science`;
                 <span class="milestone-pct-tag">${task.percent || 15}%</span>
               </div>
               <div class="milestone-stepper-bar">
-                <div class="milestone-step-dot ${task.step_index >= 1 ? (task.step_index === 1 ? 'active' : 'done') : ''}" title="Step 1: Form Detection"></div>
-                <div class="milestone-step-dot ${task.step_index >= 2 ? (task.step_index === 2 ? 'active' : 'done') : ''}" title="Step 2: Applicant Data"></div>
-                <div class="milestone-step-dot ${task.step_index >= 3 ? (task.step_index === 3 ? 'active' : 'done') : ''}" title="Step 3: Resume Attachment"></div>
-                <div class="milestone-step-dot ${task.step_index >= 4 ? (task.step_index === 4 ? 'active' : 'done') : ''}" title="Step 4: AI Screening Q&A"></div>
-                <div class="milestone-step-dot ${task.step_index >= 5 ? 'done' : ''}" title="Step 5: Submission & Verification"></div>
+                <div class="milestone-step-dot ${task.step_index >= 1 ? (task.step_index === 1 ? 'active' : 'done') : ''}" title="Stage 2: Detail Enrichment"></div>
+                <div class="milestone-step-dot ${task.step_index >= 2 ? (task.step_index === 2 ? 'active' : 'done') : ''}" title="Stage 3: AI Match Scoring"></div>
+                <div class="milestone-step-dot ${task.step_index >= 3 ? (task.step_index === 3 ? 'active' : 'done') : ''}" title="Stage 4: Resume Tailoring"></div>
+                <div class="milestone-step-dot ${task.step_index >= 4 ? (task.step_index === 4 ? 'active' : 'done') : ''}" title="Stage 5: Autonomous Apply"></div>
+                <div class="milestone-step-dot ${task.step_index >= 5 ? 'done' : ''}" title="Submission & Verification"></div>
               </div>
               <div class="milestone-bottom-line">
                 <span class="text-xs text-dim">Step ${task.step_index || 1}/5</span>
@@ -1722,6 +2109,43 @@ Bachelor of Science in Computer Science`;
             </div>
           `;
         }
+
+        // Live update score cell if available
+        if (task.score !== undefined && task.score !== null) {
+          const scoreCell = row.cells && row.cells[1] ? row.cells[1] : row.querySelector('.score-pill')?.closest('td');
+          if (scoreCell) {
+            const s = task.score;
+            scoreCell.innerHTML = `
+              <span class="score-pill ${s >= 8 ? 'score-high' : s >= 6 ? 'score-mid' : 'score-low'}">
+                ${s}
+              </span>
+            `;
+          }
+        }
+
+        // Live update resume cell if available
+        if (task.tailored_filename) {
+          const resumeCell = row.cells && row.cells[5] ? row.cells[5] : null;
+          if (resumeCell && !resumeCell.querySelector('.btn-view-resume')) {
+            resumeCell.innerHTML = `
+              <div class="resume-chip-cluster">
+                <button class="btn btn-xs btn-ghost btn-view-resume" data-file="${escapeHTML(task.tailored_filename)}" data-url="${escapeHTML(url)}" title="View ATS Resume">
+                  📄 Tailored ATS
+                </button>
+                <button class="btn btn-xs btn-icon btn-open-custom-replace" data-file="${escapeHTML(task.tailored_filename)}" data-url="${escapeHTML(url)}" title="Replace with Custom Resume">
+                  ✏️
+                </button>
+              </div>
+            `;
+            resumeCell.querySelector('.btn-view-resume')?.addEventListener('click', () => {
+              openResumeModal(task.tailored_filename, url, false);
+            });
+            resumeCell.querySelector('.btn-open-custom-replace')?.addEventListener('click', () => {
+              openResumeModal(task.tailored_filename, url, true);
+            });
+          }
+        }
+
         if (startApplyCell) {
           startApplyCell.innerHTML = `
             <span class="badge badge-warning text-xs">
@@ -1809,11 +2233,18 @@ Bachelor of Science in Computer Science`;
   // ── Render Jobs Table with Checkboxes & Milestone Bar ─────────────
   function renderJobsTable(jobs) {
     if (!el.jobsTableBody) return;
+
+    const wrapper = el.jobsTableBody.closest('.jobs-table-wrapper');
+    const prevScrollTop = wrapper ? wrapper.scrollTop : 0;
+    const prevScrollY = window.scrollY;
+
     if (!jobs || jobs.length === 0) {
       el.jobsTableBody.innerHTML = `
         <tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--text-dim);">
           No jobs found matching your filters.
         </td></tr>`;
+      if (wrapper) wrapper.scrollTop = prevScrollTop;
+      window.scrollTo({ top: prevScrollY, behavior: 'instant' });
       updateBulkActionBar();
       return;
     }
@@ -1821,10 +2252,21 @@ Bachelor of Science in Computer Science`;
     el.jobsTableBody.innerHTML = jobs
       .map((j) => {
         const isChecked = state.selectedJobUrls.has(j.url);
-        const task = state.autoApplyTasks[j.url];
-        const isTaskRunning = task && task.status === 'in_progress';
-        const isTaskComplete = task && task.status === 'completed';
-        const isApplied = !!j.applied_at || isTaskComplete;
+        const dbInProgress = j.apply_status === 'in_progress' || j.apply_status === 'applying' || j.apply_status === 'starting' || j.apply_status === 'pending';
+        let task = state.autoApplyTasks[j.url];
+        if (!task && dbInProgress) {
+          task = {
+            url: j.url,
+            status: 'in_progress',
+            percent: 30,
+            step_index: 2,
+            current_step: 'Autonomous Apply in-progress...',
+            remaining_steps: ['AI Match Scoring', 'Resume Tailoring', 'Autonomous Apply', 'Submission']
+          };
+        }
+        const isTaskRunning = (!!task && task.status === 'in_progress') || dbInProgress;
+        const isTaskComplete = !isTaskRunning && !dbInProgress && !!task && task.status === 'completed';
+        const isApplied = !isTaskRunning && !dbInProgress && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed') || isTaskComplete);
         const hasError = !!j.apply_error;
         const hasResume = !!j.tailored_filename;
         const filename = j.tailored_filename || '';
@@ -1871,20 +2313,20 @@ Bachelor of Science in Computer Science`;
                   <div class="milestone-top-line">
                     <span class="milestone-live-step">
                       <span class="pulse-indicator"></span>
-                      ${escapeHTML(task.current_step || 'Auto Applying...')}
+                      ${escapeHTML(task?.current_step || 'Auto Applying...')}
                     </span>
-                    <span class="milestone-pct-tag">${task.percent || 15}%</span>
+                    <span class="milestone-pct-tag">${task?.percent || 15}%</span>
                   </div>
                   <div class="milestone-stepper-bar">
-                    <div class="milestone-step-dot ${task.step_index >= 1 ? (task.step_index === 1 ? 'active' : 'done') : ''}" title="Step 1: Form Detection"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 2 ? (task.step_index === 2 ? 'active' : 'done') : ''}" title="Step 2: Applicant Data"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 3 ? (task.step_index === 3 ? 'active' : 'done') : ''}" title="Step 3: Resume Attachment"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 4 ? (task.step_index === 4 ? 'active' : 'done') : ''}" title="Step 4: AI Screening Q&A"></div>
-                    <div class="milestone-step-dot ${task.step_index >= 5 ? 'done' : ''}" title="Step 5: Submission & Verification"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 1 ? (task?.step_index === 1 ? 'active' : 'done') : ''}" title="Stage 2: Detail Enrichment"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 2 ? (task?.step_index === 2 ? 'active' : 'done') : ''}" title="Stage 3: AI Match Scoring"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 3 ? (task?.step_index === 3 ? 'active' : 'done') : ''}" title="Stage 4: Resume Tailoring"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 4 ? (task?.step_index === 4 ? 'active' : 'done') : ''}" title="Stage 5: Autonomous Apply"></div>
+                    <div class="milestone-step-dot ${task?.step_index >= 5 ? 'done' : ''}" title="Submission & Verification"></div>
                   </div>
                   <div class="milestone-bottom-line">
-                    <span class="text-xs text-dim">Step ${task.step_index || 1}/5</span>
-                    <span class="text-xs text-dim-alt">${task.remaining_steps ? task.remaining_steps.length : 0} steps left</span>
+                    <span class="text-xs text-dim">Step ${task?.step_index || 1}/5</span>
+                    <span class="text-xs text-dim-alt">${task?.remaining_steps ? task.remaining_steps.length : 0} steps left</span>
                   </div>
                 </div>
               ` : isApplied ? `
@@ -1928,9 +2370,13 @@ Bachelor of Science in Computer Science`;
       })
       .join('');
 
+    if (wrapper) wrapper.scrollTop = prevScrollTop;
+    window.scrollTo({ top: prevScrollY, behavior: 'instant' });
+
     // Row selection checkboxes
     el.jobsTableBody.querySelectorAll('.job-row-select').forEach((cb) => {
       cb.addEventListener('change', (e) => {
+        e.stopPropagation();
         const url = cb.getAttribute('data-url');
         if (cb.checked) {
           state.selectedJobUrls.add(url);
@@ -1947,27 +2393,35 @@ Bachelor of Science in Computer Science`;
     el.jobsTableBody.querySelectorAll('.btn-view-job').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
+        e.stopPropagation();
         openJobModal(btn.getAttribute('data-url'));
       });
     });
 
     // View Tailored Resume buttons
     el.jobsTableBody.querySelectorAll('.btn-view-resume').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         openResumeModal(btn.getAttribute('data-file'), btn.getAttribute('data-url'), false);
       });
     });
 
     // Open Replace with Custom Resume
     el.jobsTableBody.querySelectorAll('.btn-open-custom-replace, .btn-open-custom-attach').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         openResumeModal(btn.getAttribute('data-file') || '', btn.getAttribute('data-url'), true);
       });
     });
 
     // Single Row Start Auto Apply
     el.jobsTableBody.querySelectorAll('.btn-row-start-apply').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        btn.blur();
         const url = btn.getAttribute('data-url');
         if (url) triggerAutoApplyJobs([url]);
       });
@@ -2183,25 +2637,58 @@ Bachelor of Science in Computer Science`;
       card.style.cursor = 'pointer';
       card.addEventListener('click', () => {
         const stage = card.getAttribute('data-stage');
+        const isAlreadyActive = card.classList.contains('active-filter');
+        document.querySelectorAll('.kpi-card[data-stage]').forEach((c) => c.classList.remove('active-filter'));
+
+        if (isAlreadyActive) {
+          // Toggle off
+          state.activeKpiFilter = null;
+          state.stageFilter = 'all';
+          if (el.filterStageSelect) el.filterStageSelect.value = 'all';
+          state.appliedStageFilter = 'all';
+          if (el.filterAppliedStageSelect) el.filterAppliedStageSelect.value = 'all';
+          fetchJobsData();
+          return;
+        }
+
+        card.classList.add('active-filter');
+        state.activeKpiFilter = stage;
+
         if (stage === 'error') {
           el.tabBtnErrors?.click();
           return;
         }
         if (stage === 'applied') {
           document.querySelector('.tab-btn[data-tab="tab-applied"]')?.click();
+          if (el.filterAppliedStageSelect) {
+            el.filterAppliedStageSelect.value = 'applied';
+            state.appliedStageFilter = 'applied';
+            state.appliedPage = 1;
+            renderAppliedJobsTable();
+          }
+          return;
+        }
+        if (stage === 'tailored') {
+          document.querySelector('.tab-btn[data-tab="tab-applied"]')?.click();
+          if (el.filterAppliedStageSelect) {
+            el.filterAppliedStageSelect.value = 'with_resume';
+            state.appliedStageFilter = 'with_resume';
+            state.appliedPage = 1;
+            renderAppliedJobsTable();
+          }
           return;
         }
         document.querySelector('.tab-btn[data-tab="tab-all-jobs"]')?.click();
         const stageMap = {
-          'discovered': 'all',
-          'scored': 'scored',
-          'tailored': 'tailored',
-          'ready': 'ready',
+          discovered: 'all',
+          scored: 'scored',
+          ready: 'ready',
         };
         const targetVal = stageMap[stage] || 'all';
         if (el.filterStageSelect) {
           el.filterStageSelect.value = targetVal;
           state.stageFilter = targetVal;
+          state.jobsPage = 1;
           fetchJobsData();
         }
       });
@@ -2211,11 +2698,31 @@ Bachelor of Science in Computer Science`;
     el.tabBtns?.forEach((btn) => {
       btn.addEventListener('click', () => {
         const targetTab = btn.getAttribute('data-tab');
+        state.currentTab = targetTab;
+        localStorage.setItem('applypilot_active_tab', targetTab);
         el.tabBtns.forEach((b) => b.classList.remove('active'));
         el.tabPanes.forEach((p) => p.classList.remove('active'));
         btn.classList.add('active');
         document.getElementById(targetTab)?.classList.add('active');
+
+        // Update score distribution for active tab
+        if (targetTab === 'tab-applied') {
+          updateAppliedScoreDistribution();
+        } else if (targetTab === 'tab-all-jobs') {
+          if (state.selectedScoreFilter === null && state.minScoreFilter === '' && state.siteFilter === 'all' && state.stageFilter === 'all' && !state.searchKeyword) {
+            renderScoreDistribution(state.stats?.score_distribution);
+          } else {
+            fetchJobsData();
+          }
+        }
       });
+    });
+
+    // Clear Score Filter Active Badge Button
+    el.btnClearScoreFilter?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearScoreFilter();
     });
 
     // Job Search & Filters
@@ -2224,24 +2731,47 @@ Bachelor of Science in Computer Science`;
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         state.searchKeyword = e.target.value.trim();
+        state.jobsPage = 1;
         fetchJobsData();
       }, 300);
     });
 
     el.filterStageSelect?.addEventListener('change', (e) => {
       state.stageFilter = e.target.value;
+      state.jobsPage = 1;
       fetchJobsData();
     });
 
     el.filterSiteSelect?.addEventListener('change', (e) => {
       state.siteFilter = e.target.value;
+      state.jobsPage = 1;
       fetchJobsData();
     });
 
     el.filterMinScoreSelect?.addEventListener('change', (e) => {
-      state.selectedScoreFilter = null; // Clear histogram click filter so dropdown works!
+      state.selectedScoreFilter = null; // Clear histogram click filter so dropdown works
+      updateScoreBadge();
       state.minScoreFilter = e.target.value;
+      state.jobsPage = 1;
       fetchJobsData();
+    });
+
+    el.btnResetAllFilters?.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.searchKeyword = '';
+      state.stageFilter = 'all';
+      state.siteFilter = 'all';
+      state.minScoreFilter = '';
+      state.selectedScoreFilter = null;
+      state.jobsPage = 1;
+      if (el.jobsSearchInput) el.jobsSearchInput.value = '';
+      if (el.filterStageSelect) el.filterStageSelect.value = 'all';
+      if (el.filterSiteSelect) el.filterSiteSelect.value = 'all';
+      if (el.filterMinScoreSelect) el.filterMinScoreSelect.value = '';
+      updateScoreBadge();
+      fetchJobsData();
+      renderSources(state.stats?.sites);
+      showToast('All job filters reset.', 'info');
     });
 
     // Master Selection & Bulk Actions for All Jobs Table
@@ -2264,7 +2794,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Auto Apply for All Jobs Table
-    el.btnHeaderAutoApply?.addEventListener('click', () => {
+    el.btnHeaderAutoApply?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const urls = Array.from(state.selectedJobUrls);
       if (urls.length > 0) {
         triggerAutoApplyJobs(urls);
@@ -2300,7 +2832,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Select Ready Jobs (Score >= 7 or Tailored Resume Ready)
-    el.btnHeaderSelectReady?.addEventListener('click', () => {
+    el.btnHeaderSelectReady?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const visibleCheckboxes = el.jobsTableBody?.querySelectorAll('.job-row-select') || [];
       let count = 0;
       visibleCheckboxes.forEach((cb) => {
@@ -2329,7 +2863,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Clear Selection
-    el.btnHeaderClearSelection?.addEventListener('click', () => {
+    el.btnHeaderClearSelection?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       state.selectedJobUrls.clear();
       el.jobsTableBody?.querySelectorAll('.job-row-select').forEach((cb) => {
         cb.checked = false;
@@ -2346,7 +2882,9 @@ Bachelor of Science in Computer Science`;
       showToast('Selection cleared.', 'info');
     });
 
-    el.btnBulkAutoApply?.addEventListener('click', () => {
+    el.btnBulkAutoApply?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const urls = Array.from(state.selectedJobUrls);
       if (urls.length === 0) return;
       triggerAutoApplyJobs(urls);
@@ -2394,23 +2932,52 @@ Bachelor of Science in Computer Science`;
       clearTimeout(appliedDebounce);
       appliedDebounce = setTimeout(() => {
         state.appliedSearchKeyword = e.target.value.trim();
+        state.appliedPage = 1;
         renderAppliedJobsTable();
+        updateAppliedScoreDistribution();
       }, 250);
     });
 
     el.filterAppliedStageSelect?.addEventListener('change', (e) => {
       state.appliedStageFilter = e.target.value;
+      state.appliedPage = 1;
       renderAppliedJobsTable();
+      updateAppliedScoreDistribution();
     });
 
     el.filterAppliedSiteSelect?.addEventListener('change', (e) => {
       state.appliedSiteFilter = e.target.value;
+      state.appliedPage = 1;
       renderAppliedJobsTable();
+      updateAppliedScoreDistribution();
     });
 
     el.filterAppliedMinScoreSelect?.addEventListener('change', (e) => {
+      state.selectedScoreFilter = null;
+      updateScoreBadge();
       state.appliedMinScoreFilter = e.target.value;
+      state.appliedPage = 1;
       renderAppliedJobsTable();
+      updateAppliedScoreDistribution();
+    });
+
+    el.btnResetAppliedFilters?.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.appliedSearchKeyword = '';
+      state.appliedStageFilter = 'all';
+      state.appliedSiteFilter = 'all';
+      state.appliedMinScoreFilter = '';
+      state.selectedScoreFilter = null;
+      state.appliedPage = 1;
+      if (el.appliedSearchInput) el.appliedSearchInput.value = '';
+      if (el.filterAppliedStageSelect) el.filterAppliedStageSelect.value = 'all';
+      if (el.filterAppliedSiteSelect) el.filterAppliedSiteSelect.value = 'all';
+      if (el.filterAppliedMinScoreSelect) el.filterAppliedMinScoreSelect.value = '';
+      updateScoreBadge();
+      renderAppliedJobsTable();
+      updateAppliedScoreDistribution();
+      renderSources(state.stats?.sites);
+      showToast('Applied job filters reset.', 'info');
     });
 
     // Applied Tab Master Selection Checkbox
@@ -2440,7 +3007,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Auto Apply / Re-apply for Applied Tab
-    el.btnHeaderAppliedAutoApply?.addEventListener('click', () => {
+    el.btnHeaderAppliedAutoApply?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const urls = Array.from(state.selectedJobUrls);
       if (urls.length > 0) {
         triggerAutoApplyJobs(urls);
@@ -2469,7 +3038,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Select All Visible for Applied Tab
-    el.btnHeaderAppliedSelectAll?.addEventListener('click', () => {
+    el.btnHeaderAppliedSelectAll?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const visibleCheckboxes = el.appliedJobsTableBody?.querySelectorAll('.applied-row-select') || [];
       let count = 0;
       visibleCheckboxes.forEach((cb) => {
@@ -2491,7 +3062,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Topmost Header Clear Selection for Applied Tab
-    el.btnHeaderAppliedClearSelection?.addEventListener('click', () => {
+    el.btnHeaderAppliedClearSelection?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       state.selectedJobUrls.clear();
       el.appliedJobsTableBody?.querySelectorAll('.applied-row-select').forEach((cb) => {
         cb.checked = false;
@@ -2509,7 +3082,9 @@ Bachelor of Science in Computer Science`;
     });
 
     // Floating Bulk Action Bar Buttons for Applied Tab
-    el.btnBulkAppliedAutoApply?.addEventListener('click', () => {
+    el.btnBulkAppliedAutoApply?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const urls = Array.from(state.selectedJobUrls);
       if (urls.length === 0) return;
       triggerAutoApplyJobs(urls);
@@ -2751,10 +3326,43 @@ Bachelor of Science in Computer Science`;
     const initialView = window.location.hash.replace('#', '') || 'home';
     switchView(initialView);
 
-    // Load profiles and refresh data
+    // Cross-tab synchronization via BroadcastChannel
+    if (syncChannel) {
+      syncChannel.onmessage = (event) => {
+        if (event.data && (event.data.type === 'AUTO_APPLY_TASK_UPDATE' || event.data.type === 'auto_apply_updated')) {
+          pollApplyStatus(true);
+        }
+      };
+    }
+
+    // Restore active tab if previously stored
+    const savedTab = localStorage.getItem('applypilot_active_tab');
+    if (savedTab) {
+      state.currentTab = savedTab;
+      const tabBtn = document.querySelector(`.tab-btn[data-tab="${savedTab}"]`);
+      if (tabBtn) {
+        el.tabBtns.forEach((b) => b.classList.remove('active'));
+        el.tabPanes.forEach((p) => p.classList.remove('active'));
+        tabBtn.classList.add('active');
+        document.getElementById(savedTab)?.classList.add('active');
+      }
+    }
+
+    // Load cached tasks from localStorage
+    loadCachedTasks();
+
+    // Load profiles (which restores saved profile from localStorage)
     await loadProfiles();
+
+    // Load backend status BEFORE initial refresh so in-progress tasks are known before table render
+    await pollApplyStatus(false);
+
+    // Refresh telemetry and jobs
     await refreshData();
     await checkPipelineStatus();
+
+    // Always initiate auto-apply poller to persist in-progress tasks across reloads and tabs
+    startApplyStatusPolling();
 
     // Start background auto-refresh
     if (state.refreshRate > 0) {

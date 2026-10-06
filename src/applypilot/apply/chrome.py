@@ -116,7 +116,7 @@ def setup_worker_profile(worker_id: int) -> Path:
 
     # Find a source: prefer existing worker (has session cookies), else user profile
     source: Path | None = None
-    for wid in range(10):
+    for wid in range(100):
         if wid == worker_id:
             continue
         candidate = config.CHROME_WORKER_DIR / f"worker-{wid}"
@@ -245,9 +245,27 @@ def launch_chrome(worker_id: int, port: int | None = None,
     with _chrome_lock:
         _chrome_procs[worker_id] = proc
 
-    # Give Chrome time to start and open the debug port
-    time.sleep(3)
-    logger.info("[worker-%d] Chrome started on port %d (pid %d)",
+    # Actively wait for Chrome to be ready and listening on debug port
+    import httpx
+    ready = False
+    deadline = time.time() + 15.0
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"Chrome exited prematurely with code {proc.returncode}")
+        try:
+            r = httpx.get(f"http://127.0.0.1:{port}/json/version", timeout=1.0)
+            if r.status_code == 200:
+                ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.3)
+
+    if not ready:
+        _kill_process_tree(proc.pid)
+        raise RuntimeError(f"Chrome failed to open debug port {port} within 15 seconds")
+
+    logger.info("[worker-%d] Chrome started and listening on port %d (pid %d)",
                 worker_id, port, proc.pid)
     return proc
 

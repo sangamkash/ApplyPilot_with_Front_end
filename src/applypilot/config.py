@@ -171,13 +171,35 @@ DEFAULTS = {
 }
 
 
+REPO_DIR = Path(__file__).resolve().parent.parent.parent
+
+
 def load_env():
-    """Load environment variables from ~/.applypilot/.env if it exists."""
-    from dotenv import load_dotenv
+    """Load environment variables from ~/.applypilot/.env and repo root fallback."""
+    from dotenv import load_dotenv, dotenv_values
+
+    # Clean up placeholder values in environment if previously injected
+    for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        val = os.environ.get(k, "")
+        if val.startswith("YOUR_") or val == "test_key":
+            os.environ.pop(k, None)
+
+    # 1. Load active profile / app env
     if ENV_PATH.exists():
-        load_dotenv(ENV_PATH)
-    # Also try CWD .env as fallback
-    load_dotenv()
+        env_dict = dotenv_values(ENV_PATH)
+        for k, v in env_dict.items():
+            if v and not v.startswith("YOUR_") and v != "test_key":
+                if k not in os.environ or os.environ[k].startswith("YOUR_"):
+                    os.environ[k] = v
+
+    # 2. Fallback to repo root .env or CWD .env for missing keys
+    for fallback in (REPO_DIR / ".env", Path(".env")):
+        if fallback.exists():
+            fb_dict = dotenv_values(fallback)
+            for k, v in fb_dict.items():
+                if v and not v.startswith("YOUR_") and v != "test_key":
+                    if k not in os.environ or os.environ[k].startswith("YOUR_"):
+                        os.environ[k] = v
 
 
 # ---------------------------------------------------------------------------
@@ -202,22 +224,29 @@ def get_tier() -> int:
 
     Tier 1 (Discovery):            Python + pip
     Tier 2 (AI Scoring & Tailoring): + LLM API key
-    Tier 3 (Full Auto-Apply):       + Claude Code CLI + Chrome
+    Tier 3 (Full Auto-Apply):       + Configured AI Provider (Claude/Gemini/OpenAI) + Chrome
     """
     load_env()
 
-    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL"))
+    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY"))
     if not has_llm:
         return 1
 
-    has_claude = shutil.which("claude") is not None
     try:
         get_chrome_path()
         has_chrome = True
     except FileNotFoundError:
         has_chrome = False
 
-    if has_claude and has_chrome:
+    provider = os.environ.get("AUTO_APPLY_AI_PROVIDER", "claude").lower().strip()
+    if provider == "gemini":
+        has_provider = bool(os.environ.get("GEMINI_API_KEY"))
+    elif provider == "openai":
+        has_provider = bool(os.environ.get("OPENAI_API_KEY"))
+    else:  # claude
+        has_provider = shutil.which("claude") is not None or bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    if has_provider and has_chrome:
         return 3
 
     return 2
@@ -237,12 +266,19 @@ def check_tier(required: int, feature: str) -> None:
     from rich.console import Console
     _console = Console(stderr=True)
 
+    provider = os.environ.get("AUTO_APPLY_AI_PROVIDER", "claude").lower().strip()
+
     missing: list[str] = []
-    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")):
+    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY")):
         missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
-        if not shutil.which("claude"):
-            missing.append("Claude Code CLI — install from [bold]https://claude.ai/code[/bold]")
+        if provider == "gemini" and not os.environ.get("GEMINI_API_KEY"):
+            missing.append("GEMINI_API_KEY — set in ~/.applypilot/.env or environment for Gemini auto-apply")
+        elif provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
+            missing.append("OPENAI_API_KEY — set in ~/.applypilot/.env or environment for OpenAI auto-apply")
+        elif provider == "claude" and not (shutil.which("claude") or os.environ.get("ANTHROPIC_API_KEY")):
+            missing.append("Claude Code CLI or ANTHROPIC_API_KEY — install from [bold]https://claude.ai/code[/bold]")
+
         try:
             get_chrome_path()
         except FileNotFoundError:
@@ -258,3 +294,4 @@ def check_tier(required: int, feature: str) -> None:
             _console.print(f"  - {m}")
     _console.print()
     raise SystemExit(1)
+

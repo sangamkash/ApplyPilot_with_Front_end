@@ -309,7 +309,7 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
 
     # Application stage
     stats["applied"] = conn.execute(
-        "SELECT COUNT(*) FROM jobs WHERE applied_at IS NOT NULL"
+        "SELECT COUNT(*) FROM jobs WHERE (apply_status = 'applied' OR (applied_at IS NOT NULL AND (apply_status IS NULL OR apply_status != 'failed')))"
     ).fetchone()[0]
 
     stats["apply_errors"] = conn.execute(
@@ -319,7 +319,7 @@ def get_stats(conn: sqlite3.Connection | None = None) -> dict:
     stats["ready_to_apply"] = conn.execute(
         "SELECT COUNT(*) FROM jobs "
         "WHERE tailored_resume_path IS NOT NULL "
-        "AND applied_at IS NULL "
+        "AND (applied_at IS NULL AND (apply_status IS NULL OR apply_status != 'applied')) "
         "AND application_url IS NOT NULL"
     ).fetchone()[0]
 
