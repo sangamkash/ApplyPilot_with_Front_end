@@ -162,7 +162,7 @@ class BrowserController:
                 const results = [];
                 const elements = document.querySelectorAll('input, textarea, select');
                 for (const el of elements) {
-                    if (el.type === 'hidden' || el.style.display === 'none' || el.style.visibility === 'hidden') {
+                    if (el.type === 'hidden' || ((el.style.display === 'none' || el.style.visibility === 'hidden') && el.type !== 'file')) {
                         continue;
                     }
                     const rect = el.getBoundingClientRect();
@@ -414,7 +414,11 @@ class BrowserController:
         # Try direct selector
         try:
             loc = p.locator(selector_or_text).first
-            if loc.is_visible():
+            if loc.count() > 0:
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
                 loc.click(timeout=5000)
                 time.sleep(1.5)
                 return True
@@ -424,7 +428,11 @@ class BrowserController:
         # Try by button text
         try:
             loc = p.get_by_role("button", name=re.compile(re.escape(selector_or_text), re.IGNORECASE)).first
-            if loc.is_visible():
+            if loc.count() > 0:
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
                 loc.click(timeout=5000)
                 time.sleep(1.5)
                 return True
@@ -434,7 +442,11 @@ class BrowserController:
         # Try by link text
         try:
             loc = p.get_by_role("link", name=re.compile(re.escape(selector_or_text), re.IGNORECASE)).first
-            if loc.is_visible():
+            if loc.count() > 0:
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
                 loc.click(timeout=5000)
                 time.sleep(1.5)
                 return True
@@ -444,7 +456,11 @@ class BrowserController:
         # Try by text locator
         try:
             loc = p.get_by_text(re.compile(re.escape(selector_or_text), re.IGNORECASE)).first
-            if loc.is_visible():
+            if loc.count() > 0:
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
                 loc.click(timeout=5000)
                 time.sleep(1.5)
                 return True
@@ -477,5 +493,14 @@ class BrowserController:
         time.sleep(seconds)
 
     def verify_submission(self) -> Tuple[bool, str]:
-        """Run submission verification on the current page."""
+        """Run submission verification across open pages in the context."""
+        if self._context and self._context.pages:
+            pages_to_check = [self.page] + [p for p in reversed(self._context.pages) if p != self.page]
+            for pg in pages_to_check:
+                try:
+                    v, r = verify_page_submission(pg)
+                    if v:
+                        return True, r
+                except Exception:
+                    pass
         return verify_page_submission(self.page)

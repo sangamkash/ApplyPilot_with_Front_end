@@ -31,6 +31,7 @@ from applypilot.apply.providers import (
     ClaudeProvider,
     GeminiProvider,
     OpenAIProvider,
+    OllamaProvider,
 )
 from applypilot.apply.providers.browser_controller import BrowserController
 from applypilot.apply.providers.verification import verify_submission_on_port, verify_page_submission
@@ -347,6 +348,53 @@ def test_openai_provider_execution_flow(monkeypatch, mock_server, real_chrome):
         status, duration = provider.run(job=job, port=real_chrome, worker_id=88, dry_run=False)
         assert status == "applied"
         assert duration > 0
+
+    if os.path.exists(res_pdf):
+        os.remove(res_pdf)
+
+
+def test_ollama_provider_execution_flow(monkeypatch, mock_server, real_chrome):
+    """Verify OllamaProvider executes real flow and strictly verifies submission."""
+    monkeypatch.setenv("AUTO_APPLY_AI_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "gpt-oss:20b")
+
+    provider = get_provider()
+    assert isinstance(provider, OllamaProvider)
+    assert provider.name == "ollama"
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(b"%PDF-1.4 test resume")
+        res_pdf = f.name
+
+    job = {
+        "url": f"{mock_server}/apply/job-1",
+        "title": "Golang Backend Developer",
+        "site": "TestCorp",
+        "fit_score": 9,
+        "tailored_resume_path": res_pdf,
+    }
+
+    mock_turns = _mock_llm_responses_for_real_flow(res_pdf)
+    turn_idx = 0
+
+    def mock_post(*args, **kwargs):
+        nonlocal turn_idx
+        idx = min(turn_idx, len(mock_turns) - 1)
+        turn_idx += 1
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = mock_turns[idx]
+        return resp
+
+    mock_get = MagicMock()
+    mock_get.status_code = 200
+    mock_get.json.return_value = {"version": "0.3.14", "models": [{"name": "gpt-oss:20b"}]}
+
+    with patch("httpx.get", return_value=mock_get):
+        with patch("httpx.Client.post", side_effect=mock_post):
+            status, duration = provider.run(job=job, port=real_chrome, worker_id=88, dry_run=False)
+            assert status == "applied"
+            assert duration > 0
 
     if os.path.exists(res_pdf):
         os.remove(res_pdf)

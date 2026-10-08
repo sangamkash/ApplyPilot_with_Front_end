@@ -81,6 +81,7 @@ profiles:
     examples:
       - "Thinking/Reasoning variants"
       - "Advanced reasoning models"
+      - "gpt-oss:20b (Ollama local)"
 
 # Phase recommendations (suggestions, not requirements)
 phase_recommendations:

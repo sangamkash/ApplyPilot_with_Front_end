@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import typer
@@ -150,7 +151,7 @@ def apply(
     limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Max applications to submit."),
     workers: int = typer.Option(1, "--workers", "-w", help="Number of parallel browser workers."),
     min_score: int = typer.Option(7, "--min-score", help="Minimum fit score for job selection."),
-    model: str = typer.Option("haiku", "--model", "-m", help="Claude model name."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="AI model name override."),
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
@@ -233,8 +234,8 @@ def apply(
         if not job_row:
             console.print(f"[red]Job not found for URL:[/red] {url}")
             raise typer.Exit(code=1)
-        # If job was previously applied or failed (re-apply scenario), reset status so worker acquires it
-        if job_row[1] == "applied" or job_row[2] is not None or job_row[1] == "failed":
+        # If job was previously applied, failed, or pre-marked in_progress, reset status so worker acquires it
+        if job_row[1] in ("applied", "failed", "in_progress") or job_row[2] is not None:
             conn.execute("""
                 UPDATE jobs
                 SET apply_status = 'pending', applied_at = NULL, apply_error = NULL
@@ -279,11 +280,22 @@ def apply(
     from applypilot.apply.providers import get_active_provider_name
     active_provider = get_active_provider_name()
 
+    effective_model = model
+    if not effective_model or (effective_model.lower() in ("haiku", "sonnet", "opus") and active_provider != "claude"):
+        if active_provider == "gemini":
+            effective_model = os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash"
+        elif active_provider == "openai":
+            effective_model = os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+        else:
+            effective_model = effective_model or os.environ.get("CLAUDE_MODEL") or "haiku"
+    elif not effective_model:
+        effective_model = os.environ.get("CLAUDE_MODEL") or "haiku"
+
     console.print("\n[bold blue]Launching Auto-Apply[/bold blue]")
     console.print(f"  Provider: {active_provider}")
     console.print(f"  Limit:    {'unlimited' if continuous else effective_limit}")
     console.print(f"  Workers:  {workers}")
-    console.print(f"  Model:    {model}")
+    console.print(f"  Model:    {effective_model}")
     console.print(f"  Headless: {headless}")
     console.print(f"  Dry run:  {dry_run}")
     if url:
@@ -295,7 +307,7 @@ def apply(
         target_url=url,
         min_score=min_score,
         headless=headless,
-        model=model,
+        model=effective_model,
         dry_run=dry_run,
         continuous=continuous,
         workers=workers,
@@ -459,6 +471,19 @@ def doctor() -> None:
             results.append(("OpenAI Auto-Apply", ok_mark, f"Ready ({omodel})"))
         else:
             results.append(("OpenAI Auto-Apply", fail_mark, "OPENAI_API_KEY required for OpenAI auto-apply"))
+    elif active_provider == "ollama":
+        import httpx
+        from applypilot.apply.providers.ollama import get_ollama_base_url, get_ollama_model
+        ollama_url = get_ollama_base_url()
+        omodel = get_ollama_model()
+        try:
+            r = httpx.get(f"{ollama_url}/api/version", timeout=1.5)
+            if r.status_code == 200:
+                results.append(("Ollama Auto-Apply", ok_mark, f"Ready ({omodel} @ {ollama_url})"))
+            else:
+                results.append(("Ollama Auto-Apply", fail_mark, f"Server responded with {r.status_code}"))
+        except Exception:
+            results.append(("Ollama Auto-Apply", fail_mark, f"Ollama not reachable at {ollama_url} (run 'ollama serve')"))
     else:  # claude
         claude_bin = shutil.which("claude")
         if claude_bin:

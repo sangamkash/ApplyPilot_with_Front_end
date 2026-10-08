@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ApplyPilot Architecture: Frontend, State Management & Backend API",
+    "output": ".archify/architecture-applypilot-20261008-220433/applypilot.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/sangamkash/ApplyPilot_with_Front_end.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "3212e7b2d2204eab2c702abab7685d59e0c3c138"
+    }
+  },
+  "components": [
+    {
+      "id": "ui_views",
+      "type": "frontend",
+      "label": "Single Page UI Views",
+      "sublabel": "Home · Pipeline · Monitor",
+      "pos": [40, 80],
+      "size": [190, 68],
+      "sources": [
+        {
+          "path": "web/static/index.html",
+          "line": 100,
+          "end_line": 235,
+          "label": "Views markup"
+        }
+      ]
+    },
+    {
+      "id": "state_mgmt",
+      "type": "frontend",
+      "label": "Client State & Routing",
+      "sublabel": "Reactive State · BroadcastChannel",
+      "pos": [390, 80],
+      "size": [200, 68],
+      "sources": [
+        {
+          "path": "web/static/app.js",
+          "line": 7,
+          "end_line": 50,
+          "label": "Global state & cache"
+        }
+      ]
+    },
+    {
+      "id": "api_client",
+      "type": "frontend",
+      "label": "REST Client & Polling",
+      "sublabel": "fetchAPI · postAPI (2s loop)",
+      "pos": [740, 80],
+      "size": [190, 68],
+      "sources": [
+        {
+          "path": "web/static/app.js",
+          "line": 300,
+          "end_line": 327,
+          "label": "fetchAPI & postAPI"
+        }
+      ]
+    },
+    {
+      "id": "http_server",
+      "type": "backend",
+      "label": "Dashboard HTTP Server",
+      "sublabel": "Python SimpleHTTPRequestHandler",
+      "pos": [740, 310],
+      "size": [200, 68],
+      "sources": [
+        {
+          "path": "web/server.py",
+          "line": 923,
+          "end_line": 965,
+          "label": "DashboardHandler & routing"
+        }
+      ]
+    },
+    {
+      "id": "proc_manager",
+      "type": "backend",
+      "label": "Process & Pipeline Runner",
+      "sublabel": "ACTIVE_RUNS · Subprocess Popen",
+      "pos": [390, 310],
+      "size": [200, 68],
+      "sources": [
+        {
+          "path": "web/server.py",
+          "line": 1807,
+          "end_line": 1875,
+          "label": "Pipeline subprocess execution"
+        }
+      ]
+    },
+    {
+      "id": "cli_workers",
+      "type": "backend",
+      "label": "ApplyPilot CLI Pipeline",
+      "sublabel": "discover · enrich · score · tailor · apply",
+      "pos": [40, 310],
+      "size": [190, 68],
+      "sources": [
+        {
+          "path": "web/server.py",
+          "line": 43,
+          "end_line": 61,
+          "label": "CLI binary resolution"
+        }
+      ]
+    },
+    {
+      "id": "sqlite_db",
+      "type": "database",
+      "label": "Profile SQLite DBs",
+      "sublabel": "WAL read-only · jobs & telemetry",
+      "pos": [570, 480],
+      "size": [190, 68],
+      "sources": [
+        {
+          "path": "web/server.py",
+          "line": 1094,
+          "end_line": 1150,
+          "label": "Stats & jobs query execution"
+        }
+      ]
+    },
+    {
+      "id": "profile_fs",
+      "type": "backend",
+      "label": "Profiles & Resumes Storage",
+      "sublabel": "~/.applypilot · JSON, YAML & PDF",
+      "pos": [820, 480],
+      "size": [200, 68],
+      "sources": [
+        {
+          "path": "web/server.py",
+          "line": 992,
+          "end_line": 1025,
+          "label": "Profile configuration & resume I/O"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Browser Frontend (SPA)",
+      "wraps": ["ui_views", "state_mgmt", "api_client"]
+    },
+    {
+      "kind": "region",
+      "label": "Python Server & CLI Engine (Localhost :8080)",
+      "wraps": ["http_server", "proc_manager", "cli_workers", "sqlite_db", "profile_fs"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-view-action",
+      "from": "ui_views",
+      "to": "state_mgmt",
+      "label": "User Events & Hash Routing",
+      "variant": "emphasis"
+    },
+    {
+      "id": "state-to-client",
+      "from": "state_mgmt",
+      "to": "api_client",
+      "label": "Triggers Requests & Sync"
+    },
+    {
+      "id": "client-to-server",
+      "from": "api_client",
+      "to": "http_server",
+      "label": "JSON REST API (/api/*)",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "server-to-proc",
+      "from": "http_server",
+      "to": "proc_manager",
+      "label": "/api/pipeline/run & stop"
+    },
+    {
+      "id": "proc-to-cli",
+      "from": "proc_manager",
+      "to": "cli_workers",
+      "label": "Spawns Subprocess Workers",
+      "variant": "emphasis"
+    },
+    {
+      "id": "server-to-db",
+      "from": "http_server",
+      "to": "sqlite_db",
+      "label": "/api/stats & /api/jobs",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "server-to-fs",
+      "from": "http_server",
+      "to": "profile_fs",
+      "label": "/api/profiles & /api/resume",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Frontend Components & UI Views",
+      "items": [
+        "Home Hub: Candidate profiles switching, spotlight metrics, and profile creator modal",
+        "Pipeline Stage Control: 5-stage interactive execution tracker with live telemetry",
+        "Live Monitor Dashboard: Real-time telemetry, fit score distribution, and application error diagnostics"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Client State Management",
+      "items": [
+        "Reactive centralized state object managing active profile, filters, pagination, and run flags",
+        "Cross-tab synchronization powered by BroadcastChannel API",
+        "Periodic 2000ms polling cycle keeping pipeline telemetry and live job status updated"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Backend API & Persistence",
+      "items": [
+        "Lightweight Python SimpleHTTPRequestHandler serving REST API endpoints and static assets",
+        "Subprocess execution engine launching background CLI discovery, scoring, and auto-apply runs",
+        "Multi-profile SQLite database storage (WAL mode) and local filesystem config sync in ~/.applypilot"
+      ]
+    }
+  ]
+}

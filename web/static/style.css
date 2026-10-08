@@ -2735,10 +2735,37 @@ tr.row-selected {
   gap: 3px;
 }
 
-.status-cell-error {
+.status-cell-error,
+.status-cell-failed {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  max-width: 190px;
+}
+
+.status-cell-error .text-rose,
+.status-cell-failed .text-rose {
+  font-size: 0.72rem;
+  color: #fb7185;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+  display: block;
+}
+
+.badge-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(244, 63, 94, 0.12);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  width: fit-content;
 }
 
 /* ========================================================================= */

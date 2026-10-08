@@ -111,7 +111,6 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                        fit_score, location, full_description, cover_letter_path
                 FROM jobs
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
-                  AND apply_status != 'in_progress'
                 LIMIT 1
             """, (target_url, target_url, like, like)).fetchone()
         else:
@@ -327,6 +326,7 @@ PERMANENT_FAILURES: set[str] = {
     "not_a_job_application", "unsafe_permissions",
     "unsafe_verification", "sso_required",
     "site_blocked", "cloudflare_blocked", "blocked_by_cloudflare",
+    "quota_exceeded", "auth_error", "invalid_api_key", "model_not_found",
 }
 
 PERMANENT_PREFIXES: tuple[str, ...] = ("site_blocked", "cloudflare", "blocked_by")
@@ -339,6 +339,7 @@ def _is_permanent_failure(result: str) -> bool:
         result in PERMANENT_FAILURES
         or reason in PERMANENT_FAILURES
         or any(reason.startswith(p) for p in PERMANENT_PREFIXES)
+        or "quota" in reason.lower()
     )
 
 
@@ -423,6 +424,13 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 update_state(worker_id, jobs_failed=failed,
                              jobs_done=applied + failed)
 
+                # Halt batch loop on fatal AI provider failures (e.g. quota exhausted or invalid auth)
+                # to prevent launching Chrome and hammering provider for all remaining jobs in queue
+                if reason in ("quota_exceeded", "auth_error", "invalid_api_key", "model_not_found") or "quota" in reason.lower():
+                    logger.error("Halting worker %d: Fatal AI provider error (%s). Halting queue.", worker_id, reason)
+                    add_event(f"[W{worker_id}] Auto-apply halted: {reason.replace('_', ' ').title()}")
+                    break
+
         except KeyboardInterrupt:
             release_lock(job["url"])
             if _stop_event.is_set():
@@ -432,7 +440,7 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         except Exception as e:
             logger.exception("Worker %d launcher error", worker_id)
             add_event(f"[W{worker_id}] Launcher error: {str(e)[:40]}")
-            release_lock(job["url"])
+            mark_result(job["url"], "failed", error=str(e)[:100], permanent=False)
             failed += 1
             update_state(worker_id, jobs_failed=failed)
         finally:

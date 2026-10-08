@@ -350,6 +350,18 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
     env = os.environ.copy()
     env["APPLYPILOT_DIR"] = str(profile_dir)
     env["PYTHONUNBUFFERED"] = "1"
+
+    # Merge profile and repo .env variables into subprocess env so provider settings are guaranteed
+    try:
+        from dotenv import dotenv_values
+        for p_env_file in [REPO_DIR / ".env", profile_dir / ".env"]:
+            if p_env_file.exists():
+                for k, v in dotenv_values(p_env_file).items():
+                    if v and not v.startswith("YOUR_") and v != "test_key":
+                        env[k] = v
+    except Exception:
+        pass
+
     extra_paths = ["/Users/sangam/.nvm/versions/node/v22.15.1/bin", "/opt/homebrew/bin", "/usr/local/bin"]
     curr_path = env.get("PATH", "")
     for p in extra_paths:

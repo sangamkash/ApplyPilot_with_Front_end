@@ -177,6 +177,7 @@ web webui ui start:
 	if [ -n "$$PID" ]; then \
 		echo -e "$(YELLOW)⚠️  Port $(PORT) is currently in use by PID: $$PID$(RESET)"; \
 		echo -e "   Run $(BOLD)make web-stop$(RESET) to kill it, or choose another port: $(BOLD)make web PORT=8081$(RESET)\n"; \
+		exit 1; \
 	fi
 ifeq ($(OPEN),1)
 	@(sleep 1 && $(BROWSER_OPEN) "http://localhost:$(PORT)" >/dev/null 2>&1 || true) &

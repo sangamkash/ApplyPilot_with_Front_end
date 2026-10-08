@@ -54,8 +54,10 @@ class GeminiProvider(AIProvider):
         self.validate_environment()
         api_key = os.environ["GEMINI_API_KEY"]
 
+        # Filter out Claude model names that might be passed as generic defaults
+        chosen_model = model if model and model.lower() not in ("haiku", "sonnet", "opus") else None
         # Support GEMINI_MODEL env var or model override or default
-        effective_model = os.environ.get("GEMINI_MODEL") or model or DEFAULT_GEMINI_MODEL
+        effective_model = os.environ.get("GEMINI_MODEL") or chosen_model or DEFAULT_GEMINI_MODEL
 
         with self._lock:
             self._stop_flags[worker_id] = False

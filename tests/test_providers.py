@@ -3,11 +3,14 @@
 import os
 import pytest
 
+from unittest.mock import patch, MagicMock
+
 from applypilot.apply.providers import (
     AIProvider,
     ClaudeProvider,
     GeminiProvider,
     OpenAIProvider,
+    OllamaProvider,
     get_provider,
     get_active_provider_name,
 )
@@ -23,6 +26,9 @@ def test_get_active_provider_name(monkeypatch):
 
     monkeypatch.setenv("AUTO_APPLY_AI_PROVIDER", "OPENAI")
     assert get_active_provider_name() == "openai"
+
+    monkeypatch.setenv("AUTO_APPLY_AI_PROVIDER", "ollama")
+    assert get_active_provider_name() == "ollama"
 
 
 def test_get_provider_instances(monkeypatch):
@@ -40,6 +46,11 @@ def test_get_provider_instances(monkeypatch):
     prov_openai = get_provider()
     assert isinstance(prov_openai, OpenAIProvider)
     assert prov_openai.name == "openai"
+
+    monkeypatch.setenv("AUTO_APPLY_AI_PROVIDER", "ollama")
+    prov_ollama = get_provider()
+    assert isinstance(prov_ollama, OllamaProvider)
+    assert prov_ollama.name == "ollama"
 
 
 def test_get_provider_unsupported(monkeypatch):
@@ -68,9 +79,25 @@ def test_openai_provider_validation(monkeypatch):
     prov.validate_environment()  # Should succeed without error
 
 
+def test_ollama_provider_validation(monkeypatch):
+    prov = OllamaProvider()
+
+    # Fail case: Ollama server not reachable
+    with patch("httpx.get", side_effect=Exception("Connection refused")):
+        with pytest.raises(RuntimeError, match="Ollama server is not reachable"):
+            prov.validate_environment()
+
+    # Success case: Ollama server responds 200
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"version": "0.3.14", "models": [{"name": "gpt-oss:20b"}]}
+    with patch("httpx.get", return_value=mock_resp):
+        prov.validate_environment()  # Should succeed without error
+
+
 def test_provider_switching_without_code_changes(monkeypatch):
     """Verify Requirement 6: changing AUTO_APPLY_AI_PROVIDER switches provider without code changes."""
-    providers = ["claude", "gemini", "openai"]
+    providers = ["claude", "gemini", "openai", "ollama"]
     for p_name in providers:
         monkeypatch.setenv("AUTO_APPLY_AI_PROVIDER", p_name)
         p = get_provider()

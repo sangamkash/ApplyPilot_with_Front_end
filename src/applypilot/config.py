@@ -228,7 +228,11 @@ def get_tier() -> int:
     """
     load_env()
 
-    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY"))
+    has_llm = any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL"))
+    provider = os.environ.get("AUTO_APPLY_AI_PROVIDER", "claude").lower().strip()
+    if not has_llm and provider == "ollama":
+        has_llm = True
+
     if not has_llm:
         return 1
 
@@ -238,11 +242,12 @@ def get_tier() -> int:
     except FileNotFoundError:
         has_chrome = False
 
-    provider = os.environ.get("AUTO_APPLY_AI_PROVIDER", "claude").lower().strip()
     if provider == "gemini":
         has_provider = bool(os.environ.get("GEMINI_API_KEY"))
     elif provider == "openai":
         has_provider = bool(os.environ.get("OPENAI_API_KEY"))
+    elif provider == "ollama":
+        has_provider = True
     else:  # claude
         has_provider = shutil.which("claude") is not None or bool(os.environ.get("ANTHROPIC_API_KEY"))
 
@@ -269,13 +274,25 @@ def check_tier(required: int, feature: str) -> None:
     provider = os.environ.get("AUTO_APPLY_AI_PROVIDER", "claude").lower().strip()
 
     missing: list[str] = []
-    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY")):
-        missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
+    if required >= 2 and not any(os.environ.get(k) for k in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL")):
+        if provider != "ollama":
+            missing.append("LLM API key — run [bold]applypilot init[/bold] or set GEMINI_API_KEY")
     if required >= 3:
         if provider == "gemini" and not os.environ.get("GEMINI_API_KEY"):
             missing.append("GEMINI_API_KEY — set in ~/.applypilot/.env or environment for Gemini auto-apply")
         elif provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
             missing.append("OPENAI_API_KEY — set in ~/.applypilot/.env or environment for OpenAI auto-apply")
+        elif provider == "ollama":
+            ollama_url = (os.environ.get("OLLAMA_BASE_URL") or os.environ.get("LLM_URL") or "http://localhost:11434").rstrip("/")
+            if ollama_url.endswith("/v1"):
+                ollama_url = ollama_url[:-3]
+            try:
+                import httpx
+                r = httpx.get(f"{ollama_url}/api/version", timeout=1.0)
+                if r.status_code != 200:
+                    missing.append(f"Ollama running at {ollama_url} — run [bold]ollama serve[/bold]")
+            except Exception:
+                missing.append(f"Ollama running at {ollama_url} — run [bold]ollama serve[/bold] and pull [bold]gpt-oss:20b[/bold]")
         elif provider == "claude" and not (shutil.which("claude") or os.environ.get("ANTHROPIC_API_KEY")):
             missing.append("Claude Code CLI or ANTHROPIC_API_KEY — install from [bold]https://claude.ai/code[/bold]")
 

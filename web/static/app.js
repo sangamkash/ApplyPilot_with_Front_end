@@ -1445,6 +1445,39 @@ Bachelor of Science in Computer Science`;
     }
   }
 
+  // ── Unified Error Label Formatter ─────────────────────────────────
+  function formatErrorLabel(raw) {
+    if (!raw) return 'Failed';
+    const s = String(raw).trim();
+    const lower = s.toLowerCase();
+    if (lower.includes('quota') || lower.includes('429') || lower.includes('resource_exhausted')) {
+      return 'Quota Exceeded (429)';
+    }
+    if (lower.includes('gemini_api_error') || lower.includes('gemini api')) {
+      return 'Gemini API Error';
+    }
+    if (lower.includes('openai_api_error') || lower.includes('openai api')) {
+      return 'OpenAI API Error';
+    }
+    if (lower.includes('claude') && lower.includes('error')) {
+      return 'Claude CLI Error';
+    }
+    if (lower.includes('auth') || lower.includes('401') || lower.includes('403') || lower.includes('api_key') || lower.includes('api key')) {
+      return 'API Key / Auth Error';
+    }
+    if (lower.includes('unverified') || lower.includes('not completed')) {
+      return 'Unverified Submission';
+    }
+    if (lower.includes('exited with code')) {
+      const m = lower.match(/code\s*(\d+)/);
+      return m ? `CLI Error (code ${m[1]})` : 'Process Error';
+    }
+    if (lower.includes('timeout')) {
+      return 'Request Timeout';
+    }
+    return s.length > 25 ? s.slice(0, 25) + '...' : s;
+  }
+
   // ── Render Applied Jobs Table View (Applied, Tailored & In-Progress) ────
   function renderAppliedJobsTable() {
     if (!el.appliedJobsTableBody) return;
@@ -1544,7 +1577,13 @@ Bachelor of Science in Computer Science`;
         const isTaskRunning = (!!task && task.status === 'in_progress') || dbInProgress;
         const isTaskComplete = !isTaskRunning && !dbInProgress && !!task && task.status === 'completed';
         const isApplied = !isTaskRunning && !dbInProgress && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed') || isTaskComplete);
-        const hasError = !!j.apply_error;
+        const isFailed = !isTaskRunning && !isApplied && (
+          (!!task && task.status === 'failed') ||
+          j.apply_status === 'failed' ||
+          !!j.apply_error
+        );
+        const rawError = (task && task.error) || j.apply_error || '';
+        const errorLabel = formatErrorLabel(rawError);
         const hasResume = !!j.tailored_filename || !!j.tailored_resume_path;
         const filename = j.tailored_filename || (j.tailored_resume_path ? j.tailored_resume_path.split('/').pop() : '');
         const isCustom = !!j.is_custom_resume || (filename && filename.includes('_CUSTOM'));
@@ -1611,10 +1650,10 @@ Bachelor of Science in Computer Science`;
                   <span class="badge badge-emerald">✓ Applied</span>
                   <span class="text-xs text-dim">${j.applied_at ? new Date(j.applied_at).toLocaleDateString() : 'Confirmed'}</span>
                 </div>
-              ` : hasError ? `
-                <div class="status-cell-error" title="${escapeHTML(j.apply_error)}">
-                  <span class="badge badge-rose">⚠️ Error</span>
-                  <span class="text-xs text-rose">${escapeHTML(j.apply_error.slice(0, 22))}...</span>
+              ` : isFailed ? `
+                <div class="status-cell-error" title="${escapeHTML(rawError || 'Application failed')}">
+                  <span class="badge badge-rose">✕ Failed</span>
+                  <span class="text-xs text-rose">${escapeHTML(errorLabel)}</span>
                 </div>
               ` : `
                 <span class="badge badge-accent">
@@ -1632,6 +1671,10 @@ Bachelor of Science in Computer Science`;
                 <span class="badge badge-warning text-xs">
                   <span class="pulse-indicator"></span> Applying...
                 </span>
+              ` : isFailed ? `
+                <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(j.url)}" title="Retry Auto Apply for this job">
+                  ⚡ Retry
+                </button>
               ` : `
                 <button class="btn btn-xs btn-row-reapply" data-url="${escapeHTML(j.url)}" title="Job already applied. Click to re-run autonomous application.">
                   ⚡ Re-apply
@@ -2030,10 +2073,18 @@ Bachelor of Science in Computer Science`;
       for (const [url, task] of Object.entries(tasks)) {
         if (task.status === 'in_progress') {
           hasActiveTasks = true;
+          if (shouldUpdateDOM) {
+            updateRowMilestoneDOM(url, task);
+          }
+        } else if (!state._lastRenderedStatus || state._lastRenderedStatus[url] !== task.status) {
+          if (shouldUpdateDOM) {
+            updateRowMilestoneDOM(url, task);
+          }
         }
-        if (shouldUpdateDOM) {
-          updateRowMilestoneDOM(url, task);
-        }
+      }
+      if (!state._lastRenderedStatus) state._lastRenderedStatus = {};
+      for (const [url, task] of Object.entries(tasks)) {
+        state._lastRenderedStatus[url] = task.status;
       }
 
       // If active tasks just finished
@@ -2058,10 +2109,10 @@ Bachelor of Science in Computer Science`;
       state.autoApplyTimer = null;
     }
 
-    // Dynamic poller: fast (800ms) when active tasks exist, steady (2000ms) when idle
+    // Dynamic poller: fast (800ms) when active tasks exist, steady (2500ms) when idle
     const runPoll = async () => {
       const hasActive = await pollApplyStatus(true);
-      const nextInterval = hasActive ? 800 : 2000;
+      const nextInterval = hasActive ? 800 : 2500;
       state.autoApplyTimer = setTimeout(runPoll, nextInterval);
     };
 
@@ -2164,23 +2215,26 @@ Bachelor of Science in Computer Science`;
         }
         if (startApplyCell) {
           startApplyCell.innerHTML = `
-            <button class="btn btn-xs btn-row-reapply" data-url="${escapeHTML(url)}" title="Job already applied. Click to re-run auto application.">
-              ⚡ Re-apply
+            <button class="btn btn-xs btn-ghost btn-row-start-apply" data-url="${escapeHTML(url)}" title="Job already applied. Click to re-run auto application.">
+              ✓ Applied (Re-apply)
             </button>
           `;
-          startApplyCell.querySelector('.btn-row-reapply')?.addEventListener('click', () => triggerAutoApplyJobs([url]));
+          startApplyCell.querySelector('.btn-row-start-apply')?.addEventListener('click', () => triggerAutoApplyJobs([url]));
         }
       } else if (task.status === 'failed') {
+        const rawErr = task.error || 'Application failed';
+        const errorLabel = formatErrorLabel(rawErr);
         if (statusCell) {
           statusCell.innerHTML = `
-            <div class="status-cell-failed" title="${escapeHTML(task.error || 'Application failed')}">
-              <span class="badge badge-error">✕ ${escapeHTML(task.error ? (task.error.length > 25 ? task.error.substring(0, 25) + '...' : task.error) : 'Failed')}</span>
+            <div class="status-cell-error" title="${escapeHTML(rawErr)}">
+              <span class="badge badge-rose">✕ Failed</span>
+              <span class="text-xs text-rose">${escapeHTML(errorLabel)}</span>
             </div>
           `;
         }
         if (startApplyCell) {
           startApplyCell.innerHTML = `
-            <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(url)}" title="Retry Auto Apply">
+            <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(url)}" title="Retry Auto Apply for this job">
               ⚡ Retry
             </button>
           `;
@@ -2267,7 +2321,13 @@ Bachelor of Science in Computer Science`;
         const isTaskRunning = (!!task && task.status === 'in_progress') || dbInProgress;
         const isTaskComplete = !isTaskRunning && !dbInProgress && !!task && task.status === 'completed';
         const isApplied = !isTaskRunning && !dbInProgress && ((j.apply_status === 'applied') || (!!j.applied_at && j.apply_status !== 'failed') || isTaskComplete);
-        const hasError = !!j.apply_error;
+        const isFailed = !isTaskRunning && !isApplied && (
+          (!!task && task.status === 'failed') ||
+          j.apply_status === 'failed' ||
+          !!j.apply_error
+        );
+        const rawError = (task && task.error) || j.apply_error || '';
+        const errorLabel = formatErrorLabel(rawError);
         const hasResume = !!j.tailored_filename;
         const filename = j.tailored_filename || '';
         const isCustom = !!j.is_custom_resume;
@@ -2334,10 +2394,10 @@ Bachelor of Science in Computer Science`;
                   <span class="badge badge-emerald">✓ Applied</span>
                   <span class="text-xs text-dim">${j.applied_at ? new Date(j.applied_at).toLocaleDateString() : 'Confirmed'}</span>
                 </div>
-              ` : hasError ? `
-                <div class="status-cell-error" title="${escapeHTML(j.apply_error)}">
-                  <span class="badge badge-rose">⚠️ Error</span>
-                  <span class="text-xs text-rose">${escapeHTML(j.apply_error.slice(0, 22))}...</span>
+              ` : isFailed ? `
+                <div class="status-cell-error" title="${escapeHTML(rawError || 'Application failed')}">
+                  <span class="badge badge-rose">✕ Failed</span>
+                  <span class="text-xs text-rose">${escapeHTML(errorLabel)}</span>
                 </div>
               ` : `
                 <span class="badge ${j.fit_score >= 7 ? 'badge-accent' : 'badge-dim'}">
@@ -2358,6 +2418,10 @@ Bachelor of Science in Computer Science`;
               ` : isApplied ? `
                 <button class="btn btn-xs btn-ghost btn-row-start-apply" data-url="${escapeHTML(j.url)}" title="Job already applied. Click to re-run auto application.">
                   ✓ Applied (Re-apply)
+                </button>
+              ` : isFailed ? `
+                <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(j.url)}" title="Retry Auto Apply for this job">
+                  ⚡ Retry
                 </button>
               ` : `
                 <button class="btn btn-xs btn-primary btn-glow btn-row-start-apply" data-url="${escapeHTML(j.url)}" title="Start Auto Apply for this job">

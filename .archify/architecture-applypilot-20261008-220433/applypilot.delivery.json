@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "959c0b77-0afa-456d-b961-65e4509bd0ac",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/sangam/External/Personal/Repo/ApplyPilot_Front_end/.archify/architecture-applypilot-20261008-220433/candidate.json",
+  "output": "/Users/sangam/External/Personal/Repo/ApplyPilot_Front_end/.archify/architecture-applypilot-20261008-220433/applypilot.html",
+  "specification": {
+    "sha256": "8aeaff93ce7d0d59d689942a917dfd35b4c54e1675375b3c9e93aa5c973b8580",
+    "bytes": 6436
+  },
+  "artifact": {
+    "sha256": "a2af0009a630cc0ecec65eb1238e4ea629b6de44db1315785347208ba83cbda7",
+    "bytes": 764199
+  }
+}

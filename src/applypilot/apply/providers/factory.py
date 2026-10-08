@@ -7,11 +7,13 @@ from applypilot.apply.providers.base import AIProvider
 from applypilot.apply.providers.claude import ClaudeProvider
 from applypilot.apply.providers.gemini import GeminiProvider
 from applypilot.apply.providers.openai import OpenAIProvider
+from applypilot.apply.providers.ollama import OllamaProvider
 
 SUPPORTED_PROVIDERS = {
     "claude": ClaudeProvider,
     "gemini": GeminiProvider,
     "openai": OpenAIProvider,
+    "ollama": OllamaProvider,
 }
 
 
@@ -24,7 +26,7 @@ def get_provider(provider_name: Optional[str] = None) -> AIProvider:
     """Instantiate and return the appropriate AIProvider based on configuration.
 
     Args:
-        provider_name: Provider name ('claude', 'gemini', 'openai'). If None,
+        provider_name: Provider name ('claude', 'gemini', 'openai', 'ollama'). If None,
                        reads from AUTO_APPLY_AI_PROVIDER env var (default: 'claude').
 
     Returns:

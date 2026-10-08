@@ -9,6 +9,7 @@ Executes a ReAct loop:
 
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -210,6 +211,7 @@ def run_autonomous_browser_agent(
     dry_run: bool = False,
     extra_headers: Optional[Dict[str, str]] = None,
     stop_check: Optional[Callable[[], bool]] = None,
+    timeout: Optional[int] = None,
 ) -> Tuple[str, int]:
     """Execute an autonomous browser agent session using an OpenAI-compatible endpoint."""
     start_time = time.time()
@@ -217,8 +219,8 @@ def run_autonomous_browser_agent(
 
     # Resolve resume paths
     resume_path = job.get("tailored_resume_path")
-    if not resume_path or not Path(resume_path).exists():
-        if config.RESUME_PATH.exists():
+    if not resume_path or not Path(resume_path).exists() or (Path(resume_path).exists() and Path(resume_path).stat().st_size == 0):
+        if config.RESUME_PATH.exists() and config.RESUME_PATH.stat().st_size > 0:
             resume_path = str(config.RESUME_PATH)
             job["tailored_resume_path"] = resume_path
 
@@ -226,7 +228,7 @@ def run_autonomous_browser_agent(
     resume_text = ""
     if txt_path and txt_path.exists() and txt_path.stat().st_size > 0:
         resume_text = txt_path.read_text(encoding="utf-8")
-    elif config.RESUME_PATH.exists():
+    elif config.RESUME_PATH.exists() and config.RESUME_PATH.stat().st_size > 0:
         resume_text = config.RESUME_PATH.read_text(encoding="utf-8")
 
     # Build prompt instructions
@@ -238,9 +240,9 @@ def run_autonomous_browser_agent(
 
     # Derive PDF resume path
     src_pdf = Path(resume_path).with_suffix(".pdf").resolve() if resume_path else None
-    if src_pdf and src_pdf.exists():
+    if src_pdf and src_pdf.exists() and src_pdf.stat().st_size > 0:
         resolved_pdf_path = str(src_pdf)
-    elif resume_path and Path(resume_path).exists():
+    elif resume_path and Path(resume_path).exists() and Path(resume_path).stat().st_size > 0:
         try:
             from applypilot.scoring.pdf import convert_to_pdf
             c_pdf = convert_to_pdf(Path(resume_path))
@@ -248,7 +250,17 @@ def run_autonomous_browser_agent(
         except Exception:
             resolved_pdf_path = str(config.APP_DIR / "resume.pdf")
     else:
-        resolved_pdf_path = str(config.APP_DIR / "resume.pdf")
+        base_pdf = config.APP_DIR / "resume.pdf"
+        if base_pdf.exists() and base_pdf.stat().st_size > 0:
+            resolved_pdf_path = str(base_pdf)
+        elif config.RESUME_PATH.exists() and config.RESUME_PATH.stat().st_size > 0:
+            try:
+                from applypilot.scoring.pdf import convert_to_pdf
+                resolved_pdf_path = str(convert_to_pdf(config.RESUME_PATH))
+            except Exception:
+                resolved_pdf_path = str(base_pdf)
+        else:
+            resolved_pdf_path = str(base_pdf)
 
     # Log header
     ts_header = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -274,7 +286,8 @@ def run_autonomous_browser_agent(
     )
     add_event(f"[W{worker_id}] Starting ({provider_name}): {job['title'][:35]} @ {job.get('site', '')}")
 
-    client = httpx.Client(timeout=120)
+    req_timeout = timeout or int(os.environ.get("AUTO_APPLY_TIMEOUT", "120"))
+    client = httpx.Client(timeout=req_timeout)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -334,11 +347,65 @@ def run_autonomous_browser_agent(
                     "temperature": 0.1,
                 }
 
-                resp = client.post(endpoint_url, json=payload, headers=headers)
-                if resp.status_code != 200:
-                    err_msg = f"{provider_name} API returned {resp.status_code}: {resp.text[:200]}"
+                resp = None
+                max_api_retries = 3
+                retry_wait = 5.0
+                for attempt in range(max_api_retries):
+                    if stop_check and stop_check():
+                        return "skipped", int((time.time() - start_time) * 1000)
+                    try:
+                        resp = client.post(endpoint_url, json=payload, headers=headers)
+                    except httpx.HTTPError as net_err:
+                        logger.warning(
+                            "Provider %s network error (attempt %d/%d): %s",
+                            provider_name, attempt + 1, max_api_retries, net_err,
+                        )
+                        if attempt < max_api_retries - 1:
+                            time.sleep(retry_wait)
+                            retry_wait *= 2
+                            continue
+                        return "failed:network_error", int((time.time() - start_time) * 1000)
+
+                    if resp.status_code == 429:
+                        body_lower = resp.text.lower()
+                        is_quota_exhausted = any(k in body_lower for k in [
+                            "quota exceeded", "resource_exhausted", "quota_limit_value",
+                            "check google api quota"
+                        ])
+                        if is_quota_exhausted:
+                            logger.error(
+                                "Provider %s quota exhausted (HTTP 429 RESOURCE_EXHAUSTED). Aborting immediately without retry.",
+                                provider_name,
+                            )
+                            add_event(f"[W{worker_id}] Quota Exceeded (429): API quota exhausted for {provider_name}")
+                            return "failed:quota_exceeded", int((time.time() - start_time) * 1000)
+
+                    if resp.status_code in (401, 403):
+                        logger.error("Provider %s authentication error (HTTP %d): %s", provider_name, resp.status_code, resp.text[:150])
+                        add_event(f"[W{worker_id}] Auth Error ({resp.status_code}): Check API key for {provider_name}")
+                        return "failed:auth_error", int((time.time() - start_time) * 1000)
+
+                    if resp.status_code in (429, 503) and attempt < max_api_retries - 1:
+                        logger.warning(
+                            "Provider %s rate-limited (HTTP %d, attempt %d/%d). Retrying in %.1fs...",
+                            provider_name, resp.status_code, attempt + 1, max_api_retries, retry_wait,
+                        )
+                        add_event(f"[W{worker_id}] Rate-limited ({resp.status_code}), waiting {int(retry_wait)}s...")
+                        time.sleep(retry_wait)
+                        retry_wait *= 2
+                        continue
+                    break
+
+                if not resp or resp.status_code != 200:
+                    status_code = resp.status_code if resp else 0
+                    resp_snippet = resp.text[:200] if resp else "no response"
+                    err_msg = f"{provider_name} API returned {status_code}: {resp_snippet}"
                     logger.error(err_msg)
-                    add_event(f"[W{worker_id}] API Error: {err_msg[:40]}")
+                    if status_code == 429 and any(w in resp_snippet.lower() for w in ["quota", "resource_exhausted"]):
+                        add_event(f"[W{worker_id}] Quota Exceeded (429): Check Google API quota")
+                        return "failed:quota_exceeded", int((time.time() - start_time) * 1000)
+                    else:
+                        add_event(f"[W{worker_id}] API Error: {err_msg[:40]}")
                     return f"failed:{provider_name}_api_error", int((time.time() - start_time) * 1000)
 
                 data = resp.json()
@@ -348,20 +415,35 @@ def run_autonomous_browser_agent(
 
                 tool_calls = msg.get("tool_calls", [])
                 assistant_content = msg.get("content", "")
+                assistant_reasoning = msg.get("reasoning", "")
+                if assistant_reasoning:
+                    with open(worker_log, "a", encoding="utf-8") as lf:
+                        lf.write(f"[{provider_name} Reasoning] {assistant_reasoning}\n")
                 if assistant_content:
                     with open(worker_log, "a", encoding="utf-8") as lf:
                         lf.write(f"[{provider_name}] {assistant_content}\n")
 
                 if not tool_calls:
                     # Model stopped calling tools; check if completed or gave result line
-                    if "RESULT:APPLIED" in assistant_content:
+                    upper_content = assistant_content.upper()
+                    if "RESULT:APPLIED" in upper_content:
                         final_status = "applied"
-                    elif "RESULT:EXPIRED" in assistant_content:
+                    elif "RESULT:EXPIRED" in upper_content:
                         final_status = "expired"
-                    elif "RESULT:CAPTCHA" in assistant_content:
+                    elif "RESULT:CAPTCHA" in upper_content:
                         final_status = "captcha"
-                    elif "RESULT:LOGIN_ISSUE" in assistant_content:
+                    elif "RESULT:LOGIN_ISSUE" in upper_content:
                         final_status = "login_issue"
+                    else:
+                        if submission_verified:
+                            final_status = "applied"
+                        else:
+                            is_v, v_reason = browser.verify_submission()
+                            if is_v:
+                                submission_verified = True
+                                final_status = "applied"
+                            elif dry_run and any(w in assistant_content.lower() for w in ["submit", "applied", "completed", "finish"]):
+                                final_status = "applied"
                     break
 
                 for tc in tool_calls:
@@ -443,8 +525,9 @@ def run_autonomous_browser_agent(
                                 if dry_run:
                                     final_status = "applied"
                                 else:
+                                    browser.wait(2.0)
                                     is_v, v_reason = browser.verify_submission()
-                                    if is_v:
+                                    if is_v or submission_verified:
                                         submission_verified = True
                                         final_status = "applied"
                                     else:
