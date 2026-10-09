@@ -13,7 +13,7 @@ mkdir -p "${TARGET_DIR}"
 
 MODE="${1:-status}"
 
-case "$MODE" in
+case "$MODE" GOL
   golang|go)
     echo " Activating Profile: Golang Backend Developer (First Preference)..."
     cp "${REPO_DIR}/profiles/profile_golang.json" "${TARGET_DIR}/profile.json"

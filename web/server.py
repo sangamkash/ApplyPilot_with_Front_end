@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,11 +23,14 @@ import signal
 import socketserver
 import subprocess
 import time
+import uuid
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 import threading
+
+logger = logging.getLogger(__name__)
 
 PORT = int(os.environ.get("PORT", 8080))
 REPO_DIR = Path(__file__).resolve().parent.parent
@@ -107,12 +111,10 @@ def _sync_repo_profile_to_user_dir(profile_id: str, target_dir: Path):
                     for i, dline in enumerate(dest_lines):
                         dline_s = dline.strip()
                         if "=" in dline_s and not dline_s.startswith("#"):
-                            dk, dv = dline_s.split("=", 1)
+                            dk, _ = dline_s.split("=", 1)
                             dk = dk.strip()
-                            dv = dv.strip().strip("'\"")
                             if dk == k:
-                                if not dv or "YOUR_" in dv or "your_" in dv:
-                                    dest_lines[i] = f"{k}={v}"
+                                dest_lines[i] = f"{k}={v}"
                                 replaced = True
                                 break
                     if not replaced:
@@ -278,7 +280,13 @@ APPLY_MILESTONES = [
 ]
 
 
-def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
+def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False,
+                        attempt_id: str | None = None):
+    """Background thread: run the full auto-apply pipeline for one job URL.
+
+    Does NOT reset apply_status unconditionally.  The atomic claim inside
+    'applypilot apply --url ...' protects against races at the DB level.
+    """
     profile_dir = get_profile_dir(profile_name)
     _load_auto_apply_tasks(profile_name)
     conn = get_writable_db_connection(profile_dir)
@@ -293,12 +301,8 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
                 job_info["title"] = r["title"] or "Job Application"
                 job_info["site"] = r["site"] or "Portal"
                 job_info["tailored_resume_path"] = r["tailored_resume_path"]
-            # Mark status as in_progress in DB so SQLite is persistent source of truth
-            conn.execute(
-                "UPDATE jobs SET apply_status = 'in_progress', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
-                (url, url)
-            )
-            conn.commit()
+            # NOTE: We do NOT set apply_status = 'in_progress' here.
+            # The atomic claim inside 'applypilot apply --url' handles that.
             conn.close()
         except Exception:
             if conn:
@@ -354,7 +358,7 @@ def _run_auto_apply_job(profile_name: str, url: str, dry_run: bool = False):
     # Merge profile and repo .env variables into subprocess env so provider settings are guaranteed
     try:
         from dotenv import dotenv_values
-        for p_env_file in [REPO_DIR / ".env", profile_dir / ".env"]:
+        for p_env_file in [profile_dir / ".env", REPO_DIR / ".env"]:
             if p_env_file.exists():
                 for k, v in dotenv_values(p_env_file).items():
                     if v and not v.startswith("YOUR_") and v != "test_key":
@@ -1852,6 +1856,15 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
             env = os.environ.copy()
             env["APPLYPILOT_DIR"] = str(target_dir)
             env["PYTHONUNBUFFERED"] = "1"
+            try:
+                from dotenv import dotenv_values
+                for p_env_file in [target_dir / ".env", REPO_DIR / ".env"]:
+                    if p_env_file.exists():
+                        for k, v in dotenv_values(p_env_file).items():
+                            if v and not v.startswith("YOUR_") and v != "test_key":
+                                env[k] = v
+            except Exception:
+                pass
 
             log_fd = open(log_file, "a", encoding="utf-8")
             try:
@@ -2079,34 +2092,92 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                     self.send_json({"error": str(e)}, status=500)
                 return
 
-            # Autonomous Apply mode with real ApplyPilot CLI workflow
+            # ----------------------------------------------------------------
+            # Autonomous Apply mode
+            # ----------------------------------------------------------------
             dry_run = bool(data.get("dry_run", False))
 
-            # Immediately mark in DB and global task registry so state is persisted across reload & tabs
-            conn = get_writable_db_connection(profile_dir)
-            job_rows_map = {}
-            if conn:
+            accepted_urls: list[str] = []
+            rejected: list[dict] = []
+
+            # DB-level duplicate check (authoritative)
+            db_conn = get_writable_db_connection(profile_dir)
+            db_statuses: dict[str, str | None] = {}
+            if db_conn:
                 try:
                     for u in urls:
-                        r = conn.execute("SELECT title, site, fit_score, tailored_resume_path FROM jobs WHERE url = ? OR application_url = ?", (u, u)).fetchone()
-                        if r:
-                            job_rows_map[u] = dict(r)
-                        conn.execute(
-                            "UPDATE jobs SET apply_status = 'in_progress', applied_at = NULL, apply_error = NULL WHERE url = ? OR application_url = ?",
+                        row = db_conn.execute(
+                            "SELECT apply_status, applied_at FROM jobs WHERE url = ? OR application_url = ?",
                             (u, u)
-                        )
-                    conn.commit()
-                    conn.close()
-                except Exception:
+                        ).fetchone()
+                        if row:
+                            db_statuses[u] = row["apply_status"]
+                            if row["applied_at"]:
+                                db_statuses[u] = "applied"
+                        else:
+                            db_statuses[u] = None
+                except Exception as e:
+                    logger.warning("Error reading job statuses: %s", e)
+                finally:
+                    db_conn.close()
+
+            for u in urls:
+                # 1. In-memory registry check (fast path)
+                with AUTO_APPLY_LOCK:
+                    existing_task = AUTO_APPLY_TASKS.get(u)
+
+                if existing_task and existing_task.get("status") == "in_progress":
+                    rejected.append({"url": u, "reason": "already_in_progress_in_memory"})
+                    logger.warning("[AutoApply] url=%s status=rejected reason=already_in_progress_in_memory", u[:80])
+                    continue
+
+                # 2. Database status check (authoritative)
+                db_status = db_statuses.get(u)
+                if db_status == "applied":
+                    rejected.append({"url": u, "reason": "already_applied"})
+                    logger.warning("[AutoApply] url=%s status=rejected reason=already_applied", u[:80])
+                    continue
+                if db_status == "in_progress":
+                    rejected.append({"url": u, "reason": "already_in_progress_db"})
+                    logger.warning("[AutoApply] url=%s status=rejected reason=already_in_progress_db", u[:80])
+                    continue
+                if db_status in ("unknown_submission", "submitted_unverified"):
+                    rejected.append({"url": u, "reason": "submission_already_attempted"})
+                    logger.warning("[AutoApply] url=%s status=rejected reason=submission_already_attempted", u[:80])
+                    continue
+
+                accepted_urls.append(u)
+
+            if not accepted_urls and rejected:
+                self.send_json({
+                    "success": False,
+                    "mode": "auto",
+                    "queued": 0,
+                    "rejected": rejected,
+                    "message": "All requested jobs are already being processed or have been applied.",
+                }, status=409)
+                return
+
+            # Register accepted URLs in task registry and fire background threads
+            now_str = datetime.now().strftime('%H:%M:%S')
+            for u in accepted_urls:
+                attempt_id = str(uuid.uuid4())[:12]
+                j_info = {}
+                db_conn2 = get_writable_db_connection(profile_dir)
+                if db_conn2:
                     try:
-                        conn.close()
+                        r = db_conn2.execute(
+                            "SELECT title, site, fit_score, tailored_resume_path FROM jobs WHERE url = ? OR application_url = ?",
+                            (u, u)
+                        ).fetchone()
+                        if r:
+                            j_info = dict(r)
                     except Exception:
                         pass
+                    finally:
+                        db_conn2.close()
 
-            now_str = datetime.now().strftime('%H:%M:%S')
-            with AUTO_APPLY_LOCK:
-                for u in urls:
-                    j_info = job_rows_map.get(u, {})
+                with AUTO_APPLY_LOCK:
                     AUTO_APPLY_TASKS[u] = {
                         "url": u,
                         "profile": profile_name,
@@ -2124,20 +2195,27 @@ window.onload = function() { setTimeout(function() { window.print(); }, 400); };
                         "log": [f"[{now_str}] Started Auto-Apply Pipeline"],
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                         "error": None,
+                        "attempt_id": attempt_id,
                     }
+                logger.info("[AutoApply] url=%s attempt=%s status=queued", u[:80], attempt_id)
             _save_auto_apply_tasks(profile_name)
 
-            for u in urls:
-                t = threading.Thread(target=_run_auto_apply_job, args=(profile_name, u, dry_run), daemon=True)
+            for u in accepted_urls:
+                t = threading.Thread(
+                    target=_run_auto_apply_job,
+                    args=(profile_name, u, dry_run),
+                    daemon=True,
+                )
                 t.start()
 
             self.send_json({
                 "success": True,
                 "mode": "auto",
-                "queued": len(urls),
-                "urls": urls,
+                "queued": len(accepted_urls),
+                "rejected": rejected,
+                "urls": accepted_urls,
                 "dry_run": dry_run,
-                "message": f"Autonomous application initiated for {len(urls)} job(s).",
+                "message": f"Autonomous application initiated for {len(accepted_urls)} job(s).",
             })
             return
 

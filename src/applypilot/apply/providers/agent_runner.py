@@ -216,6 +216,8 @@ def run_autonomous_browser_agent(
     """Execute an autonomous browser agent session using an OpenAI-compatible endpoint."""
     start_time = time.time()
     worker_log = config.LOG_DIR / f"worker-{worker_id}.log"
+    attempt_id = job.get("attempt_id", "")
+    agent_label = f"worker-{worker_id}"
 
     # Resolve resume paths
     resume_path = job.get("tailored_resume_path")
@@ -508,7 +510,52 @@ def run_autonomous_browser_agent(
                                 tool_output = json.dumps({"dry_run": True, "note": "Submit skipped in dry run mode"})
                                 final_status = "applied"
                             else:
+                                # FINAL SAFETY BARRIER: Verify we still own this job before clicking Submit.
+                                # A race could mean another process already applied.
+                                try:
+                                    from applypilot.database import get_connection as _get_conn
+                                    _safety_conn = _get_conn()
+                                    _db_row = _safety_conn.execute(
+                                        "SELECT apply_status, agent_id FROM jobs WHERE url = ?",
+                                        (job["url"],)
+                                    ).fetchone()
+                                    if _db_row:
+                                        _db_status = _db_row["apply_status"]
+                                        _db_agent = _db_row["agent_id"]
+                                        if _db_status in ("applied", "unknown_submission", "submitted_unverified"):
+                                            logger.warning(
+                                                "[AutoApply] job=%s attempt=%s status=submit_aborted "
+                                                "reason=already_%s worker=%s",
+                                                job["url"][:60], attempt_id, _db_status, worker_id
+                                            )
+                                            tool_output = json.dumps({
+                                                "submitted": False,
+                                                "aborted": True,
+                                                "reason": f"job_already_{_db_status}",
+                                            })
+                                            final_status = "skipped"
+                                            break
+                                        if _db_agent and _db_agent != agent_label:
+                                            logger.warning(
+                                                "[AutoApply] job=%s attempt=%s status=submit_aborted "
+                                                "reason=owned_by_different_agent db_agent=%s our_agent=%s",
+                                                job["url"][:60], attempt_id, _db_agent, agent_label
+                                            )
+                                            tool_output = json.dumps({
+                                                "submitted": False,
+                                                "aborted": True,
+                                                "reason": "owned_by_different_agent",
+                                            })
+                                            final_status = "skipped"
+                                            break
+                                except Exception as _se:
+                                    logger.debug("Submit safety check error (non-fatal): %s", _se)
+
                                 sub_btn = args.get("submit_button_text") or "Submit"
+                                logger.info(
+                                    "[AutoApply] job=%s attempt=%s status=submission_attempted worker=%s",
+                                    job["url"][:60], attempt_id, worker_id
+                                )
                                 clicked = browser.click_element(sub_btn)
                                 browser.wait(4.0)
                                 is_v, v_reason = browser.verify_submission()
@@ -517,6 +564,9 @@ def run_autonomous_browser_agent(
                                     final_status = "applied"
                                     tool_output = json.dumps({"submitted": clicked, "verified": True, "evidence": v_reason})
                                 else:
+                                    # Submit was clicked but verification failed.
+                                    # Use submitted_unverified so the launcher maps it to unknown_submission.
+                                    final_status = "submitted_unverified"
                                     tool_output = json.dumps({"submitted": clicked, "verified": False, "evidence": v_reason})
                         elif fn_name == "browser_finish":
                             status_arg = args.get("status", "failed")
@@ -531,7 +581,8 @@ def run_autonomous_browser_agent(
                                         submission_verified = True
                                         final_status = "applied"
                                     else:
-                                        final_status = f"failed:unverified_submission ({v_reason})"
+                                        # submit was called but page evidence is ambiguous
+                                        final_status = "submitted_unverified"
                             else:
                                 final_status = f"{status_arg}:{reason_arg}" if reason_arg else status_arg
                             tool_output = json.dumps({"finished": True, "status": final_status})
@@ -572,8 +623,8 @@ def run_autonomous_browser_agent(
                     return "applied", duration_ms
                 else:
                     add_event(f"[W{worker_id}] SUBMISSION UNVERIFIED ({elapsed}s): {v_reason[:30]}")
-                    update_state(worker_id, status="failed", last_action=f"UNVERIFIED: {v_reason[:25]}")
-                    return f"failed:unverified_submission ({v_reason[:60]})", duration_ms
+                    update_state(worker_id, status="unknown_submission", last_action=f"UNVERIFIED: {v_reason[:25]}")
+                    return "submitted_unverified", duration_ms
 
             # Non-applied outcomes
             if ":" in final_status:

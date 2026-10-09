@@ -3,6 +3,12 @@
 This is the main entry point for the apply pipeline. It pulls jobs from
 the database, launches Chrome + Claude Code for each one, parses the
 result, and updates the database. Supports parallel workers via --workers.
+
+Concurrency model:
+  - Jobs are claimed via an ATOMIC SQL UPDATE (BEGIN IMMEDIATE + rowcount check).
+  - Only the worker that successfully updates exactly one row may continue.
+  - Submission states distinguish pre-submit failures (retryable) from
+    post-submit ambiguity (not retryable: unknown_submission).
 """
 
 import atexit
@@ -16,6 +22,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,9 +95,49 @@ def _make_mcp_config(cdp_port: int) -> dict:
 # Database operations
 # ---------------------------------------------------------------------------
 
+# Statuses that mean a submission attempt was made — NEVER auto-retry these.
+SUBMISSION_ATTEMPTED_STATUSES: frozenset[str] = frozenset({
+    "applied",
+    "unknown_submission",
+    "submitted_unverified",
+})
+
+# Statuses that allow the queue to pick the job up again.
+RETRYABLE_STATUSES: frozenset[str] = frozenset({
+    "failed",
+    "pending",
+})
+
+
+def _structured_log(level: str, job_url: str, attempt_id: str | None = None,
+                    worker_id: int | None = None, provider: str | None = None,
+                    status: str | None = None, reason: str | None = None,
+                    **extra: object) -> None:
+    """Emit a structured AutoApply log line for observability."""
+    parts = [f"[AutoApply] job={job_url[:60]}"]
+    if attempt_id:
+        parts.append(f"attempt={attempt_id}")
+    if worker_id is not None:
+        parts.append(f"worker={worker_id}")
+    if provider:
+        parts.append(f"provider={provider}")
+    if status:
+        parts.append(f"status={status}")
+    if reason:
+        parts.append(f"reason={reason}")
+    for k, v in extra.items():
+        parts.append(f"{k}={v}")
+    msg = " ".join(parts)
+    getattr(logger, level, logger.info)(msg)
+
+
 def acquire_job(target_url: str | None = None, min_score: int = 7,
                 worker_id: int = 0) -> dict | None:
     """Atomically acquire the next job to apply to.
+
+    Uses an ATOMIC claim pattern: BEGIN IMMEDIATE → row candidate selection →
+    conditional UPDATE with a strict WHERE clause → rowcount check.
+    Only the worker that updates exactly 1 row may continue.
 
     Args:
         target_url: Apply to a specific URL instead of picking from queue.
@@ -98,7 +145,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
         worker_id: Worker claiming this job (for tracking).
 
     Returns:
-        Job dict or None if the queue is empty.
+        Job dict with an additional 'attempt_id' field, or None.
     """
     conn = get_connection()
     try:
@@ -108,7 +155,8 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
             like = f"%{target_url.split('?')[0].rstrip('/')}%"
             row = conn.execute("""
                 SELECT url, title, site, application_url, tailored_resume_path,
-                       fit_score, location, full_description, cover_letter_path
+                       fit_score, location, full_description, cover_letter_path,
+                       apply_status, applied_at
                 FROM jobs
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
                 LIMIT 1
@@ -128,10 +176,15 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                 params.extend(blocked_patterns)
             row = conn.execute(f"""
                 SELECT url, title, site, application_url, tailored_resume_path,
-                       fit_score, location, full_description, cover_letter_path
+                       fit_score, location, full_description, cover_letter_path,
+                       apply_status, applied_at
                 FROM jobs
                 WHERE tailored_resume_path IS NOT NULL
-                  AND (apply_status IS NULL OR apply_status = 'failed')
+                  AND (
+                      apply_status IS NULL
+                      OR apply_status IN ('failed', 'pending')
+                  )
+                  AND applied_at IS NULL
                   AND (apply_attempts IS NULL OR apply_attempts < ?)
                   AND fit_score >= ?
                   {site_clause}
@@ -144,28 +197,77 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
             conn.rollback()
             return None
 
+        current_status = row["apply_status"]
+        current_applied_at = row["applied_at"]
+        job_url = row["url"]
+
+        # --- Guard: reject terminal states ---
+        if current_applied_at or current_status == "applied":
+            conn.rollback()
+            _structured_log("warning", job_url, worker_id=worker_id,
+                            status="claim_rejected", reason="already_applied")
+            return None
+
+        if current_status == "in_progress":
+            conn.rollback()
+            _structured_log("warning", job_url, worker_id=worker_id,
+                            status="claim_rejected", reason="already_in_progress")
+            return None
+
+        if current_status in SUBMISSION_ATTEMPTED_STATUSES:
+            conn.rollback()
+            _structured_log("warning", job_url, worker_id=worker_id,
+                            status="claim_rejected",
+                            reason=f"submission_already_attempted:{current_status}")
+            return None
+
         # Skip manual ATS sites (unsolvable CAPTCHAs)
         from applypilot.config import is_manual_ats
         apply_url = row["application_url"] or row["url"]
         if is_manual_ats(apply_url):
             conn.execute(
                 "UPDATE jobs SET apply_status = 'manual', apply_error = 'manual ATS' WHERE url = ?",
-                (row["url"],),
+                (job_url,),
             )
             conn.commit()
-            logger.info("Skipping manual ATS: %s", row["url"][:80])
+            logger.info("Skipping manual ATS: %s", job_url[:80])
             return None
 
         now = datetime.now(timezone.utc).isoformat()
-        conn.execute("""
-            UPDATE jobs SET apply_status = 'in_progress',
-                           agent_id = ?,
-                           last_attempted_at = ?
+        attempt_id = str(uuid.uuid4())[:12]
+        agent_label = f"worker-{worker_id}"
+
+        # ATOMIC CLAIM: The WHERE clause ensures no other worker can race us.
+        # We require apply_status NOT IN ('in_progress', 'applied', 'unknown_submission',
+        # 'submitted_unverified') AND applied_at IS NULL.
+        cur = conn.execute("""
+            UPDATE jobs
+            SET apply_status = 'in_progress',
+                agent_id = ?,
+                apply_task_id = ?,
+                last_attempted_at = ?
             WHERE url = ?
-        """, (f"worker-{worker_id}", now, row["url"]))
+              AND applied_at IS NULL
+              AND (
+                  apply_status IS NULL
+                  OR apply_status NOT IN ('in_progress', 'applied',
+                                          'unknown_submission', 'submitted_unverified')
+              )
+        """, (agent_label, attempt_id, now, job_url))
         conn.commit()
 
-        return dict(row)
+        if cur.rowcount != 1:
+            # Another worker claimed this job between our SELECT and UPDATE.
+            _structured_log("warning", job_url, worker_id=worker_id,
+                            status="claim_rejected", reason="lost_race")
+            return None
+
+        job = dict(row)
+        job["attempt_id"] = attempt_id
+        _structured_log("info", job_url,
+                        attempt_id=attempt_id, worker_id=worker_id,
+                        status="claimed")
+        return job
     except Exception:
         conn.rollback()
         raise
@@ -173,17 +275,41 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
 
 def mark_result(url: str, status: str, error: str | None = None,
                 permanent: bool = False, duration_ms: int | None = None,
-                task_id: str | None = None) -> None:
-    """Update a job's apply status in the database."""
+                task_id: str | None = None,
+                attempt_id: str | None = None) -> None:
+    """Update a job's apply status in the database.
+
+    Special status values:
+      'applied'              — terminal success; sets applied_at.
+      'unknown_submission'   — submit was clicked but verification ambiguous;
+                               NOT retried by default.
+      'submitted_unverified' — alias for unknown_submission.
+      'failed'               — retryable (increments apply_attempts).
+    """
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()
+    tid = task_id or attempt_id
     if status == "applied":
         conn.execute("""
             UPDATE jobs SET apply_status = 'applied', applied_at = ?,
                            apply_error = NULL, agent_id = NULL,
                            apply_duration_ms = ?, apply_task_id = ?
             WHERE url = ?
-        """, (now, duration_ms, task_id, url))
+        """, (now, duration_ms, tid, url))
+        _structured_log("info", url, attempt_id=attempt_id, status="applied")
+    elif status in ("unknown_submission", "submitted_unverified"):
+        # Submit was attempted but we cannot verify; do NOT increment apply_attempts
+        # so the job is NOT auto-retried as if nothing happened.
+        conn.execute("""
+            UPDATE jobs SET apply_status = 'unknown_submission',
+                           apply_error = ?,
+                           agent_id = NULL,
+                           apply_duration_ms = ?, apply_task_id = ?
+            WHERE url = ?
+        """, (error or "submission_unverified", duration_ms, tid, url))
+        _structured_log("warning", url, attempt_id=attempt_id,
+                        status="unknown_submission",
+                        reason=error or "verification_failed_after_submit")
     else:
         attempts = 99 if permanent else "COALESCE(apply_attempts, 0) + 1"
         conn.execute(f"""
@@ -191,7 +317,9 @@ def mark_result(url: str, status: str, error: str | None = None,
                            apply_attempts = {attempts}, agent_id = NULL,
                            apply_duration_ms = ?, apply_task_id = ?
             WHERE url = ?
-        """, (status, error or "unknown", duration_ms, task_id, url))
+        """, (status, error or "unknown", duration_ms, tid, url))
+        _structured_log("info", url, attempt_id=attempt_id, status=status,
+                        reason=error or "")
     conn.commit()
 
 
@@ -386,6 +514,11 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 add_event(f"[W{worker_id}] Queue empty")
                 update_state(worker_id, status="done", last_action="queue empty")
                 break
+            # If targeting a specific URL and claim failed, stop immediately
+            if target_url:
+                add_event(f"[W{worker_id}] Target already claimed/applied, stopping")
+                update_state(worker_id, status="done", last_action="target unavailable")
+                break
             empty_polls += 1
             update_state(worker_id, status="idle",
                          last_action=f"polling ({empty_polls})")
@@ -403,6 +536,14 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
             add_event(f"[W{worker_id}] Launching Chrome...")
             chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
 
+            attempt_id = job.get("attempt_id", "")
+
+            from applypilot.apply.providers import get_active_provider_name
+            provider_name = get_active_provider_name()
+            _structured_log("info", job["url"],
+                            attempt_id=attempt_id, worker_id=worker_id,
+                            provider=provider_name, status="starting")
+
             result, duration_ms = run_job(job, port=port, worker_id=worker_id,
                                             model=model, dry_run=dry_run)
 
@@ -411,15 +552,35 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
                 add_event(f"[W{worker_id}] Skipped: {job['title'][:30]}")
                 continue
             elif result == "applied":
-                mark_result(job["url"], "applied", duration_ms=duration_ms)
+                mark_result(job["url"], "applied", duration_ms=duration_ms,
+                            attempt_id=attempt_id)
                 applied += 1
                 update_state(worker_id, jobs_applied=applied,
                              jobs_done=applied + failed)
+                _structured_log("info", job["url"],
+                                attempt_id=attempt_id, status="applied")
+            elif result in ("unknown_submission", "submitted_unverified") or \
+                    "unverified_submission" in result or "submitted_unverified" in result:
+                # Submit was clicked but verification failed — use safe unknown_submission state.
+                # Do NOT increment apply_attempts; this is NOT retryable automatically.
+                err_snippet = result.split(":", 1)[-1] if ":" in result else result
+                mark_result(job["url"], "unknown_submission",
+                            error=err_snippet[:120],
+                            duration_ms=duration_ms,
+                            attempt_id=attempt_id)
+                failed += 1
+                update_state(worker_id, jobs_failed=failed,
+                             jobs_done=applied + failed)
+                _structured_log("warning", job["url"],
+                                attempt_id=attempt_id,
+                                status="unknown_submission",
+                                reason="verification_failed_after_submit")
             else:
                 reason = result.split(":", 1)[-1] if ":" in result else result
                 mark_result(job["url"], "failed", reason,
                             permanent=_is_permanent_failure(result),
-                            duration_ms=duration_ms)
+                            duration_ms=duration_ms,
+                            attempt_id=attempt_id)
                 failed += 1
                 update_state(worker_id, jobs_failed=failed,
                              jobs_done=applied + failed)

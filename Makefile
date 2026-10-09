@@ -147,6 +147,8 @@ help:
 	@echo ""
 	@echo -e "$(BOLD)$(YELLOW)🛠️  SETUP & UTILITIES:$(RESET)"
 	@echo -e "  $(BOLD)make setup$(RESET)               Create virtualenv & install dependencies"
+	@echo -e "  $(BOLD)make sync-env$(RESET)            Sync root .env to ~/.applypilot and all profiles"
+	@echo -e "  $(BOLD)make rebuild$(RESET)             Clean, reinstall package, sync .env & restart WebUI"
 	@echo -e "  $(BOLD)make doctor$(RESET)              Diagnose system requirements and API keys"
 	@echo -e "  $(BOLD)make clean$(RESET)               Clean Python cache files and build artifacts"
 	@echo ""
@@ -227,7 +229,7 @@ dashboard-html:
 # Setup & Health Checks
 # ==============================================================================
 
-.PHONY: setup install doctor clean
+.PHONY: setup install doctor clean sync-env rebuild
 setup: install
 
 install:
@@ -246,6 +248,21 @@ install:
 		$(BIN)/pip install pydantic tls-client requests markdownify regex curl_cffi; \
 	fi
 	@echo -e "$(GREEN)✅ Setup complete. Binary available at: $(APPLYPILOT)$(RESET)"
+
+sync-env:
+	@echo -e "$(BOLD)$(CYAN)Syncing root .env across ~/.applypilot and profiles...$(RESET)"
+	@mkdir -p "$(SHARED_DIR)"
+	@cp .env "$(SHARED_DIR)/.env"
+	@for pdir in "$(SHARED_DIR)/profiles"/*; do \
+		if [ -d "$$pdir" ]; then \
+			cp .env "$$pdir/.env"; \
+			echo "  → Updated $$pdir/.env"; \
+		fi \
+	done
+	@echo -e "$(GREEN)✅ Environment synced across all profiles.$(RESET)"
+
+rebuild: clean install sync-env web-restart
+	@echo -e "$(GREEN)✅ ApplyPilot rebuild complete & WebUI restarted.$(RESET)"
 
 doctor:
 	@$(APPLYPILOT) doctor

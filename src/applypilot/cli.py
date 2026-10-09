@@ -234,17 +234,41 @@ def apply(
         if not job_row:
             console.print(f"[red]Job not found for URL:[/red] {url}")
             raise typer.Exit(code=1)
-        # If job was previously applied, failed, or pre-marked in_progress, reset status so worker acquires it
-        if job_row[1] in ("applied", "failed", "in_progress") or job_row[2] is not None:
-            conn.execute("""
-                UPDATE jobs
-                SET apply_status = 'pending', applied_at = NULL, apply_error = NULL
-                WHERE url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?
-            """, (url, url, like, like))
-            conn.commit()
+
+        job_status = job_row[1]
+        job_applied_at = job_row[2]
+
+        # Guard terminal and active states — do NOT silently reset them.
+        if job_status == "applied" or job_applied_at is not None:
+            console.print(
+                f"[green]Job is already applied.[/green]\n"
+                f"URL: {url}\n"
+                "Use [bold]--mark-failed[/bold] then retry, or [bold]--reset-failed[/bold] for "
+                "a deliberate retry decision."
+            )
+            raise typer.Exit(code=0)
+
+        if job_status == "in_progress":
+            console.print(
+                f"[yellow]Job is currently being applied by another worker.[/yellow]\n"
+                f"URL: {url}\n"
+                "If this is stale (process died), use [bold]applypilot apply --reset-failed[/bold] to clear."
+            )
+            raise typer.Exit(code=0)
+
+        if job_status in ("unknown_submission", "submitted_unverified"):
+            console.print(
+                f"[yellow]Warning: This job has an unknown submission status "
+                f"(submit was attempted but not verified).[/yellow]\n"
+                f"URL: {url}\n"
+                "It will NOT be automatically retried to prevent duplicate submissions.\n"
+                "Review the employer portal manually before using --reset-failed."
+            )
+            raise typer.Exit(code=0)
     else:
         ready = conn.execute(
             "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
+            " AND (apply_status IS NULL OR apply_status IN ('failed', 'pending'))"
         ).fetchone()[0]
         if ready == 0:
             console.print(

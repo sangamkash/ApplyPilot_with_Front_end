@@ -1757,7 +1757,7 @@ Bachelor of Science in Computer Science`;
         e.stopPropagation();
         btn.blur();
         const url = btn.getAttribute('data-url');
-        if (url) triggerAutoApplyJobs([url]);
+        if (url) triggerAutoApplyJobs([url], btn);
       });
     });
 
@@ -2000,8 +2000,26 @@ Bachelor of Science in Computer Science`;
   }
 
   // ── Auto-Apply Milestone Orchestrator (Frontend) ─────────────────
-  async function triggerAutoApplyJobs(urls) {
+  async function triggerAutoApplyJobs(urls, triggerBtn) {
     if (!urls || urls.length === 0) return;
+
+    // Frontend dedup: filter URLs already tracked as in-progress so rapid double-clicks
+    // don't create duplicate frontend state.  The backend/DB remains the authoritative guard.
+    const pendingUrls = urls.filter((u) => {
+      const task = state.autoApplyTasks[u];
+      return !task || task.status !== 'in_progress';
+    });
+
+    if (pendingUrls.length === 0) {
+      showToast('⚡ Job(s) already in progress — skipping duplicate request.', 'info');
+      return;
+    }
+
+    // Disable the button that fired this request to prevent rapid double-clicks
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.dataset._applyPending = '1';
+    }
 
     // Preserve scroll positions
     const prevWindowY = window.scrollY;
@@ -2011,7 +2029,7 @@ Bachelor of Science in Computer Science`;
     const prevAppliedScroll = appliedTableWrapper ? appliedTableWrapper.scrollTop : 0;
 
     // Optimistically set running tasks in state and update DOM rows in-place
-    urls.forEach((u) => {
+    pendingUrls.forEach((u) => {
       state.autoApplyTasks[u] = {
         url: u,
         status: 'in_progress',
@@ -2031,11 +2049,11 @@ Bachelor of Science in Computer Science`;
     // Notify other tabs immediately via BroadcastChannel
     if (syncChannel) {
       try {
-        syncChannel.postMessage({ type: 'AUTO_APPLY_TASK_UPDATE', urls: urls });
+        syncChannel.postMessage({ type: 'AUTO_APPLY_TASK_UPDATE', urls: pendingUrls });
       } catch (_) {}
     }
 
-    showToast(`⚡ Autonomous apply started for ${urls.length} job(s)...`, 'info');
+    showToast(`⚡ Autonomous apply started for ${pendingUrls.length} job(s)...`, 'info');
 
     // Restore scroll in case any layout shift attempted
     if (allTableWrapper) allTableWrapper.scrollTop = prevAllScroll;
@@ -2048,13 +2066,19 @@ Bachelor of Science in Computer Science`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile: state.profile,
-          urls: urls,
+          urls: pendingUrls,
           mode: 'auto',
         }),
       });
       startApplyStatusPolling();
     } catch (err) {
       showToast(`Error initiating auto-apply: ${err.message}`, 'error');
+    } finally {
+      // Re-enable button after request completes
+      if (triggerBtn) {
+        triggerBtn.disabled = false;
+        delete triggerBtn.dataset._applyPending;
+      }
     }
   }
 
@@ -2487,7 +2511,7 @@ Bachelor of Science in Computer Science`;
         e.stopPropagation();
         btn.blur();
         const url = btn.getAttribute('data-url');
-        if (url) triggerAutoApplyJobs([url]);
+        if (url) triggerAutoApplyJobs([url], btn);
       });
     });
 
